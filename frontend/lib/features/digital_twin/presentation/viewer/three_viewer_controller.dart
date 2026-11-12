@@ -85,12 +85,10 @@ class ThreeViewerController {
     final ViewerEvent? event = switch (decoded['type']) {
       'viewer_ready' => ViewerReady('${payload['three_revision'] ?? ''}'),
       'model_progress' => ModelProgress(
-          (payload['loaded'] as num?)?.toInt() ?? 0,
-          (payload['total'] as num?)?.toInt() ?? 0,
-        ),
-      'model_loaded' => ModelLoaded(
-          (payload['mesh_node_ids'] as List<dynamic>? ?? const []).map((e) => '$e').toList(),
-        ),
+        (payload['loaded'] as num?)?.toInt() ?? 0,
+        (payload['total'] as num?)?.toInt() ?? 0,
+      ),
+      'model_loaded' => ModelLoaded((payload['mesh_node_ids'] as List<dynamic>? ?? const []).map((e) => '$e').toList()),
       'model_error' => ModelError('${payload['message'] ?? 'Unknown error'}'),
       'node_selected' => NodeSelected(payload['mesh_node_id'] as String?),
       'viewer_error' => ViewerFailure('${payload['message'] ?? 'Unknown error'}'),

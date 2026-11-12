@@ -1,14 +1,14 @@
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-/// Public client configuration loaded from `frontend/.env` (bundled asset).
+/// Public client configuration.
+///
+/// Resolution order:
+/// 1. `--dart-define` values (used by the GitHub Pages CI build), then
+/// 2. `frontend/.env` (bundled asset, local development).
 ///
 /// Only public values belong here (Supabase URL + anon key, backend URL).
 class AppConfig {
-  const AppConfig({
-    required this.supabaseUrl,
-    required this.supabaseAnonKey,
-    required this.backendUrl,
-  });
+  const AppConfig({required this.supabaseUrl, required this.supabaseAnonKey, required this.backendUrl});
 
   final String supabaseUrl;
   final String supabaseAnonKey;
@@ -18,20 +18,25 @@ class AppConfig {
   static const String processedModelsBucket = 'processed-models';
   static const String componentDocsBucket = 'component-docs';
 
+  static const _defineUrl = String.fromEnvironment('SUPABASE_URL');
+  static const _defineAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  static const _defineBackendUrl = String.fromEnvironment('BACKEND_URL');
+
   static Future<AppConfig> load() async {
-    await dotenv.load(fileName: '.env');
-    String require(String key) {
-      final value = dotenv.maybeGet(key)?.trim() ?? '';
+    await dotenv.load(fileName: '.env', isOptional: true);
+
+    String resolve(String key, String defined, {String? fallback}) {
+      final value = defined.isNotEmpty ? defined : (dotenv.maybeGet(key)?.trim() ?? fallback ?? '');
       if (value.isEmpty) {
-        throw StateError('Missing "$key" in frontend/.env');
+        throw StateError('Missing "$key": set it in frontend/.env or pass --dart-define=$key=...');
       }
       return value;
     }
 
-    final backend = dotenv.maybeGet('BACKEND_URL', fallback: 'http://localhost:8000')!.trim();
+    final backend = resolve('BACKEND_URL', _defineBackendUrl, fallback: 'http://localhost:8000');
     return AppConfig(
-      supabaseUrl: require('SUPABASE_URL'),
-      supabaseAnonKey: require('SUPABASE_ANON_KEY'),
+      supabaseUrl: resolve('SUPABASE_URL', _defineUrl),
+      supabaseAnonKey: resolve('SUPABASE_ANON_KEY', _defineAnonKey),
       backendUrl: backend.endsWith('/') ? backend.substring(0, backend.length - 1) : backend,
     );
   }

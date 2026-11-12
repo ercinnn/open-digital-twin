@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/file_utils.dart';
 import '../../../../shared/widgets/async_states.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../domain/entities/twin_entities.dart';
 import '../providers/twin_providers.dart';
 
@@ -24,16 +25,15 @@ class _DocumentsSectionState extends ConsumerState<DocumentsSection> {
   bool _uploading = false;
 
   IconData _icon(DocumentType t) => switch (t) {
-        DocumentType.certificate => Icons.verified_outlined,
-        DocumentType.photo => Icons.photo_outlined,
-        DocumentType.manual => Icons.menu_book_outlined,
-        DocumentType.inspection => Icons.fact_check_outlined,
-      };
+    DocumentType.certificate => Icons.verified_outlined,
+    DocumentType.photo => Icons.photo_outlined,
+    DocumentType.manual => Icons.menu_book_outlined,
+    DocumentType.inspection => Icons.fact_check_outlined,
+  };
 
   void _toast(String message, {bool error = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: error ? const Color(0xFF7F1D1D) : null),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message), backgroundColor: error ? const Color(0xFF7F1D1D) : null));
   }
 
   Future<void> _upload() async {
@@ -58,7 +58,9 @@ class _DocumentsSectionState extends ConsumerState<DocumentsSection> {
     setState(() => _uploading = true);
     try {
       final bytes = await file.readAsBytes();
-      await ref.read(twinRepositoryProvider).uploadDocument(
+      await ref
+          .read(twinRepositoryProvider)
+          .uploadDocument(
             projectId: widget.projectId,
             component: widget.component,
             title: meta.$1,
@@ -104,10 +106,13 @@ class _DocumentsSectionState extends ConsumerState<DocumentsSection> {
   @override
   Widget build(BuildContext context) {
     final docs = ref.watch(documentsProvider(widget.component.id));
+    final canEdit = ref.watch(isEditorProvider);
     return SectionCard(
       title: 'Documents',
       icon: Icons.folder_open_outlined,
-      trailing: _uploading
+      trailing: !canEdit
+          ? null
+          : _uploading
           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
           : IconButton(
               tooltip: 'Upload certificate / photo',
@@ -135,12 +140,14 @@ class _DocumentsSectionState extends ConsumerState<DocumentsSection> {
                     style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                   ),
                   onTap: () => _open(d),
-                  trailing: IconButton(
-                    tooltip: 'Delete',
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.delete_outline, size: 18),
-                    onPressed: () => _delete(d),
-                  ),
+                  trailing: !canEdit
+                      ? const Icon(Icons.open_in_new, size: 16, color: AppTheme.textMuted)
+                      : IconButton(
+                          tooltip: 'Delete',
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.delete_outline, size: 18),
+                          onPressed: () => _delete(d),
+                        ),
                 ),
             ],
           );
@@ -180,14 +187,15 @@ class _DocumentMetaDialogState extends State<_DocumentMetaDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TextField(controller: _title, decoration: const InputDecoration(labelText: 'Title')),
+            TextField(
+              controller: _title,
+              decoration: const InputDecoration(labelText: 'Title'),
+            ),
             const SizedBox(height: 16),
             DropdownButtonFormField<DocumentType>(
               initialValue: _type,
               decoration: const InputDecoration(labelText: 'Type'),
-              items: [
-                for (final t in DocumentType.values) DropdownMenuItem(value: t, child: Text(t.label)),
-              ],
+              items: [for (final t in DocumentType.values) DropdownMenuItem(value: t, child: Text(t.label))],
               onChanged: (t) => setState(() => _type = t ?? _type),
             ),
           ],

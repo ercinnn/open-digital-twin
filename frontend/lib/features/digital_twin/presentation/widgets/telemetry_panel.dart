@@ -27,8 +27,10 @@ class TelemetryPanel extends ConsumerWidget {
         error: (e, _) => Text('Telemetry unavailable: $e', style: const TextStyle(color: Color(0xFFF87171))),
         data: (readings) {
           if (readings.isEmpty) {
-            return const Text('No readings yet. Use "Simulate Live Sensor".',
-                style: TextStyle(color: AppTheme.textMuted));
+            return const Text(
+              'No readings yet. Use "Simulate Live Sensor".',
+              style: TextStyle(color: AppTheme.textMuted),
+            );
           }
           final byMetric = <String, List<TelemetryReading>>{};
           for (final r in readings) {
@@ -38,13 +40,12 @@ class TelemetryPanel extends ConsumerWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (final m in metrics) ...[
-                _MetricTile(readings: byMetric[m]!),
-                const SizedBox(height: 8),
-              ],
+              for (final m in metrics) ...[_MetricTile(readings: byMetric[m]!), const SizedBox(height: 8)],
               const SizedBox(height: 4),
-              const Text('RECENT READINGS',
-                  style: TextStyle(fontSize: 10.5, letterSpacing: 0.8, color: AppTheme.textMuted)),
+              const Text(
+                'RECENT READINGS',
+                style: TextStyle(fontSize: 10.5, letterSpacing: 0.8, color: AppTheme.textMuted),
+              ),
               const SizedBox(height: 4),
               for (final r in readings.take(8))
                 Padding(
@@ -53,14 +54,22 @@ class TelemetryPanel extends ConsumerWidget {
                     children: [
                       SizedBox(
                         width: 64,
-                        child: Text(_time(r.recordedAt),
-                            style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted, fontFamily: 'monospace')),
+                        child: Text(
+                          _time(r.recordedAt),
+                          style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted, fontFamily: 'monospace'),
+                        ),
                       ),
                       Expanded(
-                        child: Text(r.metricLabel, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                        child: Text(
+                          r.metricLabel,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
                       ),
-                      Text('${_fmt(r.metricValue)} ${r.unit ?? ''}',
-                          style: const TextStyle(fontSize: 12, fontFeatures: [FontFeature.tabularFigures()])),
+                      Text(
+                        '${_fmt(r.metricValue)} ${r.unit ?? ''}',
+                        style: const TextStyle(fontSize: 12, fontFeatures: [FontFeature.tabularFigures()]),
+                      ),
                     ],
                   ),
                 ),
@@ -103,8 +112,12 @@ class _MetricTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(latest.metricLabel,
-                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted)),
+                Text(
+                  latest.metricLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                ),
                 const SizedBox(height: 2),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -117,7 +130,10 @@ class _MetricTile extends StatelessWidget {
                 ),
                 Text(
                   '${delta >= 0 ? '▲' : '▼'} ${_fmt(delta.abs())}',
-                  style: TextStyle(fontSize: 10.5, color: delta >= 0 ? const Color(0xFFFBBF24) : const Color(0xFF60A5FA)),
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: delta >= 0 ? const Color(0xFFFBBF24) : const Color(0xFF60A5FA),
+                  ),
                 ),
               ],
             ),
@@ -186,8 +202,8 @@ class _LiveDot extends StatefulWidget {
 }
 
 class _LiveDotState extends State<_LiveDot> with SingleTickerProviderStateMixin {
-  late final AnimationController _c =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat(reverse: true);
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))
+    ..repeat(reverse: true);
 
   @override
   void dispose() {

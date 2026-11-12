@@ -40,7 +40,11 @@ class ErrorView extends StatelessWidget {
           children: [
             const Icon(Icons.error_outline, color: Color(0xFFF87171), size: 36),
             const SizedBox(height: 12),
-            Text('$error', textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textMuted)),
+            Text(
+              '$error',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppTheme.textMuted),
+            ),
             if (onRetry != null) ...[
               const SizedBox(height: 12),
               OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Retry')),
@@ -68,7 +72,11 @@ class EmptyView extends StatelessWidget {
           children: [
             Icon(icon, size: 40, color: AppTheme.textMuted),
             const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.textMuted)),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppTheme.textMuted),
+            ),
           ],
         ),
       ),

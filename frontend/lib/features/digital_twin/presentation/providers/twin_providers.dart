@@ -8,10 +8,7 @@ import '../../domain/entities/twin_entities.dart';
 import '../../domain/repositories/twin_repository.dart';
 
 final twinRepositoryProvider = Provider<TwinRepository>((ref) {
-  return TwinRepositoryImpl(
-    supabase: ref.watch(supabaseClientProvider),
-    backend: ref.watch(backendApiClientProvider),
-  );
+  return TwinRepositoryImpl(supabase: ref.watch(supabaseClientProvider), backend: ref.watch(backendApiClientProvider));
 });
 
 /// Realtime BOM of a project; status changes arrive through Supabase Realtime.
@@ -40,8 +37,9 @@ class SelectedNodeNotifier extends Notifier<String?> {
   void select(String? meshNodeId) => state = meshNodeId;
 }
 
-final selectedNodeProvider =
-    NotifierProvider.autoDispose.family<SelectedNodeNotifier, String?, String>(SelectedNodeNotifier.new);
+final selectedNodeProvider = NotifierProvider.autoDispose.family<SelectedNodeNotifier, String?, String>(
+  SelectedNodeNotifier.new,
+);
 
 /// Selected component resolved from the realtime component list.
 final selectedComponentProvider = Provider.autoDispose.family<TwinComponent?, String>((ref, projectId) {
@@ -114,5 +112,6 @@ class SimulationNotifier extends Notifier<SimulationState> {
   }
 }
 
-final simulationProvider =
-    NotifierProvider.autoDispose.family<SimulationNotifier, SimulationState, String>(SimulationNotifier.new);
+final simulationProvider = NotifierProvider.autoDispose.family<SimulationNotifier, SimulationState, String>(
+  SimulationNotifier.new,
+);

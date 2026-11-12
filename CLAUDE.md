@@ -17,6 +17,7 @@ Open-source, license-free **Digital Twin Platform** for Marine Engineering (ship
   - The ingest pipeline fails with HTTP 500 if any BOM id is missing from the exported GLB.
 - **Flutter Architecture:** Feature-First Clean Architecture (`data`, `domain`, `presentation`). Provide complete, step-by-step file implementations without placeholders or TODOs.
 - **Secrets:** `SUPABASE_SERVICE_ROLE_KEY` lives ONLY in the root `.env` (backend). `frontend/.env` is bundled into the app as an asset and must contain public values only.
+- **Access model (migration 003):** `anon` + `authenticated` can only SELECT. Writes require an editor: an authenticated user listed in `public.app_editors` (checked by RPC `is_editor()`). Signing up alone grants nothing. The UI hides/disables write controls unless `isEditorProvider` is true. Add an editor with: `insert into public.app_editors (user_id) select id from auth.users where email = '<email>';`
 - **Status values:** `normal` (green), `in_progress` (blue), `warning` (orange), `alert` (pulsing red). Sensor simulation never overwrites `in_progress`.
 
 ## 4. Core Pipeline
@@ -30,7 +31,8 @@ Open-source, license-free **Digital Twin Platform** for Marine Engineering (ship
 supabase/
   config.toml                      # supabase init (CLI linked to the remote project)
   migrations/001_initial_schema.sql  # tables, indexes, trigger, realtime publication
-  migrations/002_rls_policies.sql    # RLS (permissive demo policies), buckets, storage policies
+  migrations/002_rls_policies.sql    # RLS, buckets, storage policies (demo write policies replaced by 003)
+  migrations/003_editor_write_policies.sql  # read-only public access, editor-only writes (app_editors)
   seed.sql                         # 2 demo projects, 7 components, 17 documents, 384 telemetry rows
 backend/
   app/main.py                      # FastAPI app, CORS, GET /health[?deep=true]
@@ -53,6 +55,7 @@ frontend/
   assets/viewer/index.html, twin_scene.js   # Three.js scene + bridge
   lib/core/                        # config, theme, backend client, providers, status enum
   lib/shared/widgets/              # status badges, loading/error/empty, section card
+  lib/features/auth/               # editor sign-in, read-only gating
   lib/features/projects/           # dashboard, create project, upload + ingest
   lib/features/digital_twin/       # split view, component tree, inspector, telemetry, docs, viewer bridge
 ```
@@ -82,7 +85,13 @@ supabase link --project-ref unksjqvehethysjubclj -p <SUPABASE_DB_PASSWORD from .
 supabase db push --include-seed -p <SUPABASE_DB_PASSWORD>
 ```
 
-## 7. Environment Notes (Windows dev machine)
+## 7. Public Website (GitHub Pages)
+- URL: https://ercinnn.github.io/open-digital-twin/ — built by `.github/workflows/deploy-web.yml` on every push to `main` touching `frontend/**`.
+- CI injects config with `--dart-define` from repository secrets `SUPABASE_URL`, `SUPABASE_ANON_KEY` (optional repo variable `BACKEND_URL`, default `http://localhost:8000`). `AppConfig` prefers dart-defines and falls back to `frontend/.env`.
+- Built with `--base-href /open-digital-twin/`. Locally in Git Bash prefix with `MSYS_NO_PATHCONV=1` or the path gets mangled.
+- Ingest + "Simulate Live Sensor" call the FastAPI backend, so on the public site they only work for an editor who runs the backend on their own machine.
+
+## 8. Environment Notes (Windows dev machine)
 - Blender 4.2 LTS: `C:\Program Files\Blender Foundation\Blender 4.2\blender.exe` (`BLENDER_PATH` in `.env`). Without Blender, ingest falls back to an unoptimized trimesh GLB and reports a warning.
 - `ifcopenshell` needs the Microsoft Visual C++ 2015-2022 x64 runtime (`MSVCP140.dll`).
 - trimesh 5.x merges OBJ objects unless loaded with `split_objects=True` (handled in `cad_parser.py`).

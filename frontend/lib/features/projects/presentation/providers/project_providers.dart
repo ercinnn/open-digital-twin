@@ -60,7 +60,8 @@ class IngestNotifier extends Notifier<IngestState> {
       state = IngestState(
         phase: IngestPhase.done,
         summary: summary,
-        message: '${summary.componentsUpserted} components ingested via ${summary.optimizer} '
+        message:
+            '${summary.componentsUpserted} components ingested via ${summary.optimizer} '
             'in ${summary.elapsedSeconds.toStringAsFixed(1)} s',
       );
       ref.invalidate(projectsProvider);

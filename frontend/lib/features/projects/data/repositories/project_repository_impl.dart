@@ -28,19 +28,17 @@ class ProjectRepositoryImpl implements ProjectRepository {
   }
 
   @override
-  Future<Project> createProject({
-    required String name,
-    required DomainType domainType,
-    String? description,
-  }) async {
+  Future<Project> createProject({required String name, required DomainType domainType, String? description}) async {
     final row = await supabase
         .from('projects')
-        .insert(ProjectModel.toInsertJson(
-          name: name,
-          domainType: domainType,
-          description: description,
-          ownerId: supabase.auth.currentUser?.id,
-        ))
+        .insert(
+          ProjectModel.toInsertJson(
+            name: name,
+            domainType: domainType,
+            description: description,
+            ownerId: supabase.auth.currentUser?.id,
+          ),
+        )
         .select()
         .single();
     return ProjectModel.fromJson(row);
@@ -65,7 +63,9 @@ class ProjectRepositoryImpl implements ProjectRepository {
     required Uint8List bytes,
   }) async {
     final path = '$projectId/${FileUtils.safeName(fileName)}';
-    await supabase.storage.from(AppConfig.rawCadBucket).uploadBinary(
+    await supabase.storage
+        .from(AppConfig.rawCadBucket)
+        .uploadBinary(
           path,
           bytes,
           fileOptions: FileOptions(contentType: FileUtils.contentType(fileName), upsert: true),
@@ -76,10 +76,7 @@ class ProjectRepositoryImpl implements ProjectRepository {
 
   @override
   Future<IngestSummary> triggerIngest(String projectId, {String? storagePath}) async {
-    final json = await backend.postJson(
-      '/api/v1/ingest/$projectId',
-      body: {'storage_path': ?storagePath},
-    );
+    final json = await backend.postJson('/api/v1/ingest/$projectId', body: {'storage_path': ?storagePath});
     return IngestSummaryModel.fromJson(json);
   }
 }

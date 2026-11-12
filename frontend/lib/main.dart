@@ -12,10 +12,5 @@ Future<void> main() async {
   final config = await AppConfig.load();
   await Supabase.initialize(url: config.supabaseUrl, publishableKey: config.supabaseAnonKey);
 
-  runApp(
-    ProviderScope(
-      overrides: [appConfigProvider.overrideWithValue(config)],
-      child: const OpenDigitalTwinApp(),
-    ),
-  );
+  runApp(ProviderScope(overrides: [appConfigProvider.overrideWithValue(config)], child: const OpenDigitalTwinApp()));
 }

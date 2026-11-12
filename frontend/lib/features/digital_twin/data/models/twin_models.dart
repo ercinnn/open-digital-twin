@@ -2,10 +2,10 @@ import '../../../../core/status/component_status.dart';
 import '../../domain/entities/twin_entities.dart';
 
 double? _toDouble(Object? v) => switch (v) {
-      num n => n.toDouble(),
-      String s => double.tryParse(s),
-      _ => null,
-    };
+  num n => n.toDouble(),
+  String s => double.tryParse(s),
+  _ => null,
+};
 
 DateTime _toDate(Object? v) => DateTime.tryParse('${v ?? ''}')?.toLocal() ?? DateTime.now();
 

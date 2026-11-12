@@ -7,6 +7,8 @@ import '../../../../core/status/component_status.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/async_states.dart';
 import '../../../../shared/widgets/status_badge.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../auth/presentation/widgets/account_button.dart';
 import '../../../projects/domain/entities/project.dart';
 import '../../../projects/presentation/providers/project_providers.dart';
 import '../../domain/entities/twin_entities.dart';
@@ -170,6 +172,7 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
           ],
         ),
         actions: [
+          const ReadOnlyBadge(),
           _StatusSummary(components: componentList),
           const SizedBox(width: 8),
           _SimulationControls(projectId: _projectId, onSimulateOnce: _simulateOnce),
@@ -204,6 +207,7 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
               const PopupMenuItem(value: 'reset', child: Text('Reset camera')),
             ],
           ),
+          const AccountButton(),
           const SizedBox(width: 8),
         ],
       ),
@@ -235,7 +239,10 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
                       const VerticalDivider(width: 1),
                       Expanded(
                         flex: 3,
-                        child: DecoratedBox(decoration: const BoxDecoration(color: AppTheme.background), child: inspector),
+                        child: DecoratedBox(
+                          decoration: const BoxDecoration(color: AppTheme.background),
+                          child: inspector,
+                        ),
                       ),
                     ],
                   );
@@ -251,7 +258,12 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
                         initialIndex: selectedNode == null ? 0 : 1,
                         child: Column(
                           children: [
-                            const TabBar(tabs: [Tab(text: 'Components'), Tab(text: 'Inspector')]),
+                            const TabBar(
+                              tabs: [
+                                Tab(text: 'Components'),
+                                Tab(text: 'Inspector'),
+                              ],
+                            ),
                             Expanded(child: TabBarView(children: [tree, inspector])),
                           ],
                         ),
@@ -316,8 +328,11 @@ class _ViewportStack extends StatelessWidget {
           ),
         if (!hasModel)
           const Center(
-            child: Text('This project has no processed model yet.\nUpload a CAD file from the dashboard.',
-                textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textMuted)),
+            child: Text(
+              'This project has no processed model yet.\nUpload a CAD file from the dashboard.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppTheme.textMuted),
+            ),
           ),
         if (error != null)
           Positioned(
@@ -373,8 +388,10 @@ class _Legend extends StatelessWidget {
             if (unmappedCount > 0)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: Text('$unmappedCount BOM rows without mesh',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFFFBBF24))),
+                child: Text(
+                  '$unmappedCount BOM rows without mesh',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFFFBBF24)),
+                ),
               ),
           ],
         ),
@@ -425,11 +442,12 @@ class _SimulationControls extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final sim = ref.watch(simulationProvider(projectId));
     final notifier = ref.read(simulationProvider(projectId).notifier);
+    final canEdit = ref.watch(isEditorProvider);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         FilledButton.icon(
-          onPressed: sim.running || sim.live ? null : onSimulateOnce,
+          onPressed: !canEdit || sim.running || sim.live ? null : onSimulateOnce,
           icon: sim.running
               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.sensors, size: 18),
@@ -440,7 +458,7 @@ class _SimulationControls extends ConsumerWidget {
           message: 'Continuous feed every ${SimulationNotifier.liveInterval.inSeconds}s',
           child: FilterChip(
             selected: sim.live,
-            onSelected: notifier.setLive,
+            onSelected: canEdit ? notifier.setLive : null,
             avatar: Icon(sim.live ? Icons.stop_circle_outlined : Icons.play_circle_outline, size: 18),
             label: Text(sim.live ? 'Live · ${sim.ticks}' : 'Live'),
             showCheckmark: false,

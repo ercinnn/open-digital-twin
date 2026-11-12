@@ -14,10 +14,7 @@ class AppTheme {
   static const Color construction = Color(0xFFFBBF24);
 
   static ThemeData dark() {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: accent,
-      brightness: Brightness.dark,
-    ).copyWith(
+    final scheme = ColorScheme.fromSeed(seedColor: accent, brightness: Brightness.dark).copyWith(
       primary: accent,
       surface: surface,
       surfaceContainerHighest: surfaceHigh,
@@ -44,10 +41,7 @@ class AppTheme {
         ),
       ),
       dividerTheme: const DividerThemeData(color: outline, thickness: 1, space: 1),
-      inputDecorationTheme: const InputDecorationTheme(
-        border: OutlineInputBorder(),
-        isDense: true,
-      ),
+      inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder(), isDense: true),
       snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
       tooltipTheme: const TooltipThemeData(waitDuration: Duration(milliseconds: 400)),
     );

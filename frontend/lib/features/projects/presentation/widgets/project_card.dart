@@ -9,6 +9,7 @@ class ProjectCard extends ConsumerWidget {
   const ProjectCard({
     super.key,
     required this.project,
+    required this.canEdit,
     required this.onOpen,
     required this.onUpload,
     required this.onReingest,
@@ -16,6 +17,7 @@ class ProjectCard extends ConsumerWidget {
   });
 
   final Project project;
+  final bool canEdit;
   final VoidCallback onOpen;
   final VoidCallback onUpload;
   final VoidCallback onReingest;
@@ -65,33 +67,30 @@ class ProjectCard extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  PopupMenuButton<String>(
-                    tooltip: 'Project actions',
-                    enabled: !ingest.isBusy,
-                    onSelected: (v) {
-                      if (v == 'reingest') onReingest();
-                      if (v == 'delete') onDelete();
-                    },
-                    itemBuilder: (_) => [
-                      PopupMenuItem(
-                        value: 'reingest',
-                        enabled: project.hasRawFile,
-                        child: const ListTile(
-                          dense: true,
-                          leading: Icon(Icons.replay),
-                          title: Text('Re-run ingest'),
+                  if (canEdit)
+                    PopupMenuButton<String>(
+                      tooltip: 'Project actions',
+                      enabled: !ingest.isBusy,
+                      onSelected: (v) {
+                        if (v == 'reingest') onReingest();
+                        if (v == 'delete') onDelete();
+                      },
+                      itemBuilder: (_) => [
+                        PopupMenuItem(
+                          value: 'reingest',
+                          enabled: project.hasRawFile,
+                          child: const ListTile(dense: true, leading: Icon(Icons.replay), title: Text('Re-run ingest')),
                         ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: ListTile(
-                          dense: true,
-                          leading: Icon(Icons.delete_outline, color: Color(0xFFF87171)),
-                          title: Text('Delete project'),
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: ListTile(
+                            dense: true,
+                            leading: Icon(Icons.delete_outline, color: Color(0xFFF87171)),
+                            title: Text('Delete project'),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -110,7 +109,7 @@ class ProjectCard extends ConsumerWidget {
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: ingest.isBusy ? null : onUpload,
+                      onPressed: ingest.isBusy || !canEdit ? null : onUpload,
                       icon: const Icon(Icons.upload_file, size: 18),
                       label: const Text('Upload CAD'),
                     ),
@@ -158,8 +157,11 @@ class _ModelStatusLine extends StatelessWidget {
       IngestPhase.failed => (Icons.error_outline, const Color(0xFFF87171), 'Ingest failed: ${ingest.message}'),
       IngestPhase.done => (Icons.check_circle_outline, const Color(0xFF22C55E), ingest.message ?? 'Ingest complete'),
       _ when project.hasModel => (Icons.view_in_ar, const Color(0xFF22C55E), '3D model ready'),
-      _ when project.hasRawFile =>
-        (Icons.hourglass_bottom, const Color(0xFFF59E0B), '${project.rawFileName} uploaded – not ingested'),
+      _ when project.hasRawFile => (
+        Icons.hourglass_bottom,
+        const Color(0xFFF59E0B),
+        '${project.rawFileName} uploaded – not ingested',
+      ),
       _ => (Icons.cloud_upload_outlined, AppTheme.textMuted, 'No CAD file yet'),
     };
     return Row(
@@ -167,7 +169,12 @@ class _ModelStatusLine extends StatelessWidget {
         Icon(icon, size: 15, color: color),
         const SizedBox(width: 6),
         Expanded(
-          child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: color)),
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: color),
+          ),
         ),
       ],
     );

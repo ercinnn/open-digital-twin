@@ -1,0 +1,78 @@
+name: Deploy Flutter web to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.47.9"
+          cache: true
+
+      # pubspec.yaml declares .env as an asset. In CI the values come from
+      # --dart-define instead, so ship an empty placeholder file.
+      - name: Create placeholder .env
+        run: echo "# Values are injected with --dart-define in CI" > .env
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build web
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          BACKEND_URL: ${{ vars.BACKEND_URL || 'http://localhost:8000' }}
+        run: |
+          test -n "$SUPABASE_URL" || { echo "::error::Repository secret SUPABASE_URL is not set"; exit 1; }
+          test -n "$SUPABASE_ANON_KEY" || { echo "::error::Repository secret SUPABASE_ANON_KEY is not set"; exit 1; }
+          flutter build web --release \
+            --base-href "/${{ github.event.repository.name }}/" \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+            --dart-define=BACKEND_URL="$BACKEND_URL"
+          cp build/web/index.html build/web/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

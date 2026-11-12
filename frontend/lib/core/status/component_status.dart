@@ -16,16 +16,13 @@ enum ComponentStatus {
   final IconData icon;
 
   static ComponentStatus fromDb(String? value) {
-    return ComponentStatus.values.firstWhere(
-      (s) => s.dbValue == value,
-      orElse: () => ComponentStatus.normal,
-    );
+    return ComponentStatus.values.firstWhere((s) => s.dbValue == value, orElse: () => ComponentStatus.normal);
   }
 
   int get severity => switch (this) {
-        ComponentStatus.alert => 3,
-        ComponentStatus.warning => 2,
-        ComponentStatus.inProgress => 1,
-        ComponentStatus.normal => 0,
-      };
+    ComponentStatus.alert => 3,
+    ComponentStatus.warning => 2,
+    ComponentStatus.inProgress => 1,
+    ComponentStatus.normal => 0,
+  };
 }

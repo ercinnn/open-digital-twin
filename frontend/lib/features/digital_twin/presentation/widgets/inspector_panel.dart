@@ -6,6 +6,7 @@ import '../../../../core/status/component_status.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/async_states.dart';
 import '../../../../shared/widgets/status_badge.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../domain/entities/twin_entities.dart';
 import '../providers/twin_providers.dart';
 import 'documents_section.dart';
@@ -39,10 +40,7 @@ class InspectorPanel extends ConsumerWidget {
         TelemetryPanel(componentId: component.id),
         const SizedBox(height: 12),
         DocumentsSection(projectId: projectId, component: component),
-        if (component.metadata.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          _MetadataCard(metadata: component.metadata),
-        ],
+        if (component.metadata.isNotEmpty) ...[const SizedBox(height: 12), _MetadataCard(metadata: component.metadata)],
       ],
     );
   }
@@ -118,9 +116,9 @@ class _StatusSwitcherState extends ConsumerState<_StatusSwitcher> {
       await ref.read(twinRepositoryProvider).updateStatus(widget.component.id, status);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Status update failed: $e'), backgroundColor: const Color(0xFF7F1D1D)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Status update failed: $e'), backgroundColor: const Color(0xFF7F1D1D)));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -129,14 +127,17 @@ class _StatusSwitcherState extends ConsumerState<_StatusSwitcher> {
 
   @override
   Widget build(BuildContext context) {
+    final canEdit = ref.watch(isEditorProvider);
     return SectionCard(
       title: 'Status',
       icon: Icons.traffic_outlined,
       trailing: _saving
           ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-          : const Tooltip(
-              message: 'Writes components.status – Supabase Realtime recolors the 3D mesh on every client.',
-              child: Icon(Icons.info_outline, size: 16, color: AppTheme.textMuted),
+          : Tooltip(
+              message: canEdit
+                  ? 'Writes components.status – Supabase Realtime recolors the 3D mesh on every client.'
+                  : 'Read-only: sign in with an editor account to change the status.',
+              child: const Icon(Icons.info_outline, size: 16, color: AppTheme.textMuted),
             ),
       child: Wrap(
         spacing: 6,
@@ -145,7 +146,7 @@ class _StatusSwitcherState extends ConsumerState<_StatusSwitcher> {
           for (final s in ComponentStatus.values)
             ChoiceChip(
               selected: widget.component.status == s,
-              onSelected: _saving ? null : (_) => _set(s),
+              onSelected: _saving || !canEdit ? null : (_) => _set(s),
               avatar: Icon(s.icon, size: 16, color: s.color),
               label: Text(s.label),
               selectedColor: s.color.withValues(alpha: 0.22),
@@ -198,7 +199,9 @@ class _MetadataCard extends StatelessWidget {
           for (final k in keys)
             (
               k.replaceAll('_', ' '),
-              metadata[k] is Map || metadata[k] is List ? '${metadata[k]}'.replaceAll(RegExp(r'\s+'), ' ') : '${metadata[k]}',
+              metadata[k] is Map || metadata[k] is List
+                  ? '${metadata[k]}'.replaceAll(RegExp(r'\s+'), ' ')
+                  : '${metadata[k]}',
             ),
         ],
       ),
@@ -225,9 +228,7 @@ class _KeyValueTable extends StatelessWidget {
                   width: 120,
                   child: Text(k, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                 ),
-                Expanded(
-                  child: SelectableText(v, style: const TextStyle(fontSize: 12.5)),
-                ),
+                Expanded(child: SelectableText(v, style: const TextStyle(fontSize: 12.5))),
               ],
             ),
           ),

@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/async_states.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../auth/presentation/widgets/account_button.dart';
 import '../../../digital_twin/presentation/pages/digital_twin_page.dart';
 import '../../domain/entities/project.dart';
 import '../providers/project_providers.dart';
@@ -23,17 +25,12 @@ class ProjectsDashboardPage extends ConsumerWidget {
   }
 
   Future<void> _create(BuildContext context, WidgetRef ref) async {
-    final input = await showDialog<CreateProjectInput>(
-      context: context,
-      builder: (_) => const CreateProjectDialog(),
-    );
+    final input = await showDialog<CreateProjectInput>(context: context, builder: (_) => const CreateProjectDialog());
     if (input == null || !context.mounted) return;
     try {
-      final project = await ref.read(projectRepositoryProvider).createProject(
-            name: input.name,
-            domainType: input.domainType,
-            description: input.description,
-          );
+      final project = await ref
+          .read(projectRepositoryProvider)
+          .createProject(name: input.name, domainType: input.domainType, description: input.description);
       ref.invalidate(projectsProvider);
       if (input.fileName != null && input.fileBytes != null) {
         final summary = await ref
@@ -97,14 +94,13 @@ class ProjectsDashboardPage extends ConsumerWidget {
   }
 
   void _open(BuildContext context, Project project) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => DigitalTwinPage(projectId: project.id)),
-    );
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => DigitalTwinPage(projectId: project.id)));
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final projects = ref.watch(projectsProvider);
+    final canEdit = ref.watch(isEditorProvider);
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 20,
@@ -118,6 +114,9 @@ class ProjectsDashboardPage extends ConsumerWidget {
           ],
         ),
         actions: [
+          const ReadOnlyBadge(),
+          const SizedBox(width: 8),
+          const AccountButton(),
           IconButton(
             tooltip: 'Refresh',
             onPressed: () => ref.invalidate(projectsProvider),
@@ -126,11 +125,13 @@ class ProjectsDashboardPage extends ConsumerWidget {
           const SizedBox(width: 8),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _create(context, ref),
-        icon: const Icon(Icons.add),
-        label: const Text('New Project'),
-      ),
+      floatingActionButton: canEdit
+          ? FloatingActionButton.extended(
+              onPressed: () => _create(context, ref),
+              icon: const Icon(Icons.add),
+              label: const Text('New Project'),
+            )
+          : null,
       body: projects.when(
         loading: () => const LoadingView(label: 'Loading projects ...'),
         error: (e, _) => ErrorView(error: e, onRetry: () => ref.invalidate(projectsProvider)),
@@ -156,6 +157,7 @@ class ProjectsDashboardPage extends ConsumerWidget {
                 final project = items[i];
                 return ProjectCard(
                   project: project,
+                  canEdit: canEdit,
                   onOpen: () => _open(context, project),
                   onUpload: () => _upload(context, ref, project),
                   onReingest: () => _reingest(context, ref, project),

@@ -114,7 +114,9 @@ class _WindowsThreeViewportState extends State<_WindowsThreeViewport> {
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
-      return Center(child: Text(_error!, style: const TextStyle(color: Color(0xFFFCA5A5))));
+      return Center(
+        child: Text(_error!, style: const TextStyle(color: Color(0xFFFCA5A5))),
+      );
     }
     if (!_initialized) return const Center(child: CircularProgressIndicator(strokeWidth: 2.5));
     return ww.Webview(_web);

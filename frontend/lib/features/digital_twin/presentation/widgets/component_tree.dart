@@ -6,12 +6,7 @@ import '../../domain/entities/twin_entities.dart';
 
 /// BOM grouped by category; tapping a row selects + focuses the mesh in 3D.
 class ComponentTree extends StatefulWidget {
-  const ComponentTree({
-    super.key,
-    required this.components,
-    required this.selectedNodeId,
-    required this.onSelect,
-  });
+  const ComponentTree({super.key, required this.components, required this.selectedNodeId, required this.onSelect});
 
   final List<TwinComponent> components;
   final String? selectedNodeId;
@@ -45,8 +40,15 @@ class _ComponentTreeState extends State<ComponentTree> {
             children: [
               const Icon(Icons.account_tree_outlined, size: 16, color: AppTheme.accent),
               const SizedBox(width: 8),
-              const Text('COMPONENTS',
-                  style: TextStyle(fontSize: 11.5, letterSpacing: 0.8, fontWeight: FontWeight.w700, color: AppTheme.textMuted)),
+              const Text(
+                'COMPONENTS',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  letterSpacing: 0.8,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textMuted,
+                ),
+              ),
               const Spacer(),
               Text('${widget.components.length}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
             ],
