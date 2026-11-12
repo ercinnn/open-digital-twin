@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Twin Scene</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0b1220; }
+    #viewport { position: absolute; inset: 0; }
+    #viewport canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+    #hint {
+      position: absolute; left: 12px; bottom: 10px; color: #64748b;
+      font: 11px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      pointer-events: none; user-select: none;
+    }
+    #error {
+      position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+      color: #fca5a5; font: 14px system-ui, sans-serif; text-align: center; padding: 24px;
+    }
+  </style>
+  <!-- Three.js ES modules from CDN. Resolved through this import map by the dynamic
+       import() calls inside twin_scene.js (a classic script, so it also loads from
+       file:// origins inside Android/iOS/macOS WebViews). -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="viewport"></div>
+  <div id="hint">Left-drag: orbit · Right-drag: pan · Wheel: zoom · Click: select</div>
+  <div id="error"></div>
+  <script src="twin_scene.js"></script>
+</body>
+</html>

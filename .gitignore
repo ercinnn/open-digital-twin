@@ -1,0 +1,20 @@
+# Secrets
+.env
+frontend/.env
+!**/.env.example
+
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

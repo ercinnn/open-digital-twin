@@ -1,0 +1,21 @@
+{
+  "nb42_engine_room.glb": [
+    "NODE_FUEL_PURIFIER_01",
+    "NODE_HULL_BLOCK_ER_04",
+    "NODE_MAIN_ENGINE_PORT",
+    "NODE_SW_COOLING_PUMP_01"
+  ],
+  "villa_b04.glb": [
+    "CTX_FIRST_FLOOR_SLAB",
+    "CTX_GROUND_SLAB",
+    "CTX_KITCHEN_WALL",
+    "CTX_RC_COLUMN_S02",
+    "CTX_RC_COLUMN_S03",
+    "CTX_RC_COLUMN_S04",
+    "CTX_RC_COLUMN_S05",
+    "CTX_RC_COLUMN_S06",
+    "NODE_CONCEALED_PIPE_KITCHEN",
+    "NODE_HEAT_PUMP_UNIT",
+    "NODE_RC_COLUMN_S01"
+  ]
+}
