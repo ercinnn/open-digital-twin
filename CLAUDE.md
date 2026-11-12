@@ -28,6 +28,8 @@ Open-source, license-free **Digital Twin Platform** for Marine Engineering (ship
 
 ## 5. Repository Layout
 ```
+CLAUDE.md, ROADMAP.md, .gitignore, .gitattributes (LF line endings, binary GLB/PNG/PDF)
+.github/workflows/deploy-web.yml   # Flutter web build -> GitHub Pages
 supabase/
   config.toml                      # supabase init (CLI linked to the remote project)
   migrations/001_initial_schema.sql  # tables, indexes, trigger, realtime publication
@@ -91,7 +93,24 @@ supabase db push --include-seed -p <SUPABASE_DB_PASSWORD>
 - Built with `--base-href /open-digital-twin/`. Locally in Git Bash prefix with `MSYS_NO_PATHCONV=1` or the path gets mangled.
 - Ingest + "Simulate Live Sensor" call the FastAPI backend, so on the public site they only work for an editor who runs the backend on their own machine.
 
-## 8. Environment Notes (Windows dev machine)
+## 8. Sensor / Telemetry Integration Contract
+Real sensors replace the simulator; the app needs no changes as long as readings land in `telemetry_logs`.
+- **Data flow:** sensor -> gateway (Raspberry Pi / ESP32 / PLC / ship AMS via Modbus TCP, OPC UA, NMEA 2000; building BMS via Modbus/BACnet) -> HTTPS or MQTT bridge -> `telemetry_logs` insert -> Supabase Realtime -> inspector charts.
+- **Row format:** `component_id` (resolve from `components.mesh_node_id`), `metric_name` (snake_case English), `metric_value` (numeric), `unit`, `recorded_at` (UTC; defaults to `now()`).
+- **Thresholds:** reuse the metric names in `telemetry_simulator.PROFILES` (e.g. `vibration_velocity`, `power_consumption`) so thresholds stay consistent. IMPORTANT: threshold evaluation and automatic `components.status` changes currently live ONLY in the Python simulator — rows inserted directly by real sensors update charts but do NOT recolor meshes until threshold logic moves into the database (see `ROADMAP.md`).
+- **Security:** never deploy `SUPABASE_SERVICE_ROLE_KEY` to field devices. RLS only allows editors to insert. Planned approach: per-device API keys validated by a Supabase Edge Function that may only insert telemetry (revocable per device).
+- **Volume:** aggregate at the gateway (e.g. 1-minute averages or send-on-change); per-second raw data exhausts the free plan (500 MB DB).
+
+## 9. Git & GitHub
+- Repository: https://github.com/ercinnn/open-digital-twin (public). Default branch `main`.
+- Commits MUST use the GitHub noreply address (repo-local `git config user.email` is already set to `203698815+ercinnn@users.noreply.github.com`); never commit with a personal email — the repo is public.
+- Never commit `.env` / `frontend/.env` (both gitignored). Secrets for CI are GitHub repository secrets.
+- GitHub CLI: `C:\Program Files\GitHub CLI\gh.exe` (token scopes `repo`, `workflow`, `read:org`, `gist`). Pushing changes under `.github/workflows/` requires the `workflow` scope.
+
+## 10. Roadmap
+Planned but not yet implemented work (24/7 simulator in Supabase via pg_cron, database-side thresholds, device ingest endpoint, cloud CAD ingest, real-file tests) is tracked in `ROADMAP.md`. Check it before starting related work and remove items once done.
+
+## 11. Environment Notes (Windows dev machine)
 - Blender 4.2 LTS: `C:\Program Files\Blender Foundation\Blender 4.2\blender.exe` (`BLENDER_PATH` in `.env`). Without Blender, ingest falls back to an unoptimized trimesh GLB and reports a warning.
 - `ifcopenshell` needs the Microsoft Visual C++ 2015-2022 x64 runtime (`MSVCP140.dll`).
 - trimesh 5.x merges OBJ objects unless loaded with `split_objects=True` (handled in `cad_parser.py`).
