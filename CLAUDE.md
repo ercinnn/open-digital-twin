@@ -24,17 +24,20 @@ Open-source, license-free **Digital Twin Platform** for Marine Engineering (ship
 1. Upload `.step` / `.ifc` / `.ocx` / `.obj` / `.stl` to Supabase Storage bucket `raw-cad-files` (path `<project_id>/<file>`; saved in `projects.raw_file_url`).
 2. Trigger `POST /api/v1/ingest/{project_id}` -> `cad_parser.py` tessellates + extracts BOM into `components` (upsert on `(project_id, mesh_node_id)`), Headless Blender (`convert_to_glb.py`) cleans/decimates and exports `.glb` to `processed-models/<project_id>/model.glb`; `projects.glb_model_url` is updated.
 3. Flutter loads `.glb` in Three.js. Clicking a mesh emits `node_selected` with `mesh_node_id` to load component details, documents, and live telemetry.
-4. Supabase Realtime updates on `components.status` dynamically recolor the corresponding 3D mesh node. `POST /api/v1/telemetry/simulate/{project_id}` inserts readings into `telemetry_logs` and derives status from thresholds.
+4. Supabase Realtime updates on `components.status` dynamically recolor the corresponding 3D mesh node.
+5. Sensor simulation runs IN THE DATABASE (migration 004): pg_cron job `odt_simulate_telemetry` inserts one reading per metric per minute for every project and derives `components.status` from `public.metric_profiles` thresholds; `odt_telemetry_retention` deletes `telemetry_logs` older than 4 days (hourly); `odt_cron_history_cleanup` trims `cron.job_run_details`. The app button calls RPC `simulate_telemetry(p_project_id)` (editors only); "Live" mode auto-stops after 10 min. The Python simulator (`POST /api/v1/telemetry/simulate/{project_id}`) remains for local use; `metric_profiles` MUST mirror `telemetry_simulator.PROFILES` (enforced by a backend test) - change both together via a new migration.
 
 ## 5. Repository Layout
 ```
 CLAUDE.md, ROADMAP.md, .gitignore, .gitattributes (LF line endings, binary GLB/PNG/PDF)
 .github/workflows/deploy-web.yml   # Flutter web build -> GitHub Pages
+.github/workflows/supabase-keepalive.yml  # twice-weekly REST ping so the free project is not paused
 supabase/
   config.toml                      # supabase init (CLI linked to the remote project)
   migrations/001_initial_schema.sql  # tables, indexes, trigger, realtime publication
   migrations/002_rls_policies.sql    # RLS, buckets, storage policies (demo write policies replaced by 003)
   migrations/003_editor_write_policies.sql  # read-only public access, editor-only writes (app_editors)
+  migrations/004_db_telemetry_simulator.sql # metric_profiles, simulate_telemetry RPC, pg_cron (1/min, 4-day retention)
   seed.sql                         # 3 demo projects (tug engine room, villa, shipyard), 36 components, 36 documents, 2160 telemetry rows
 backend/
   app/main.py                      # FastAPI app, CORS, GET /health[?deep=true]
@@ -94,15 +97,15 @@ supabase db push --include-seed -p <SUPABASE_DB_PASSWORD>
 - URL: https://ercinnn.github.io/open-digital-twin/ — built by `.github/workflows/deploy-web.yml` on every push to `main` touching `frontend/**`.
 - CI injects config with `--dart-define` from repository secrets `SUPABASE_URL`, `SUPABASE_ANON_KEY` (optional repo variable `BACKEND_URL`, default `http://localhost:8000`). `AppConfig` prefers dart-defines and falls back to `frontend/.env`.
 - Built with `--base-href /open-digital-twin/`. Locally in Git Bash prefix with `MSYS_NO_PATHCONV=1` or the path gets mangled.
-- Ingest + "Simulate Live Sensor" call the FastAPI backend, so on the public site they only work for an editor who runs the backend on their own machine.
+- Ingest calls the FastAPI backend, so on the public site it only works for an editor who runs the backend on their own machine. "Simulate Live Sensor" uses the Supabase RPC and works anywhere for editors; telemetry also updates every minute without any user.
 
 ## 8. Sensor / Telemetry Integration Contract
 Real sensors replace the simulator; the app needs no changes as long as readings land in `telemetry_logs`.
 - **Data flow:** sensor -> gateway (Raspberry Pi / ESP32 / PLC / ship AMS via Modbus TCP, OPC UA, NMEA 2000; building BMS via Modbus/BACnet) -> HTTPS or MQTT bridge -> `telemetry_logs` insert -> Supabase Realtime -> inspector charts.
 - **Row format:** `component_id` (resolve from `components.mesh_node_id`), `metric_name` (snake_case English), `metric_value` (numeric), `unit`, `recorded_at` (UTC; defaults to `now()`).
-- **Thresholds:** reuse the metric names in `telemetry_simulator.PROFILES` (e.g. `vibration_velocity`, `power_consumption`) so thresholds stay consistent. IMPORTANT: threshold evaluation and automatic `components.status` changes currently live ONLY in the Python simulator — rows inserted directly by real sensors update charts but do NOT recolor meshes until threshold logic moves into the database (see `ROADMAP.md`).
+- **Thresholds:** reuse the metric names in `telemetry_simulator.PROFILES` (e.g. `vibration_velocity`, `power_consumption`) so thresholds stay consistent. IMPORTANT: threshold evaluation and automatic `components.status` changes currently live ONLY in the simulators (Python + `public._simulate_project_telemetry`) — rows inserted directly by real sensors update charts but do NOT recolor meshes until an insert trigger evaluates `public.metric_profiles` (see `ROADMAP.md`).
 - **Security:** never deploy `SUPABASE_SERVICE_ROLE_KEY` to field devices. RLS only allows editors to insert. Planned approach: per-device API keys validated by a Supabase Edge Function that may only insert telemetry (revocable per device).
-- **Volume:** aggregate at the gateway (e.g. 1-minute averages or send-on-change); per-second raw data exhausts the free plan (500 MB DB).
+- **Volume:** aggregate at the gateway (e.g. 1-minute averages or send-on-change); per-second raw data exhausts the free plan (500 MB DB). The built-in simulator alone writes ~130k rows/day (90 metrics x 1/min, ~100-190 MB at 4-day retention); adding projects/metrics or real sensors needs the retention window re-checked.
 
 ## 9. Git & GitHub
 - Repository: https://github.com/ercinnn/open-digital-twin (public). Default branch `main`.

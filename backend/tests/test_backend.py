@@ -66,6 +66,37 @@ def _seed_mesh_node_ids(project_id: str) -> list[str]:
     return [m["node"] for m in _seed_component_rows() if m["project"] == project_id]
 
 
+MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "supabase" / "migrations"
+_PROFILE_ROW = re.compile(
+    r"\('(?P<category>[a-z_]+)', '(?P<metric>[a-z_]+)', '(?P<unit>[^']*)', "
+    r"(?P<nominal>[-0-9.]+), (?P<sigma>[-0-9.]+), (?P<warning>[-0-9.]+), (?P<alert>[-0-9.]+), "
+    r"'(?P<direction>high|low)', (?P<reversion>[-0-9.]+), (?P<excursion>[-0-9.]+), (?P<minimum>[-0-9.]+), (?P<order>\d+)\)"
+)
+
+
+def test_database_metric_profiles_match_python_profiles() -> None:
+    """migration 004 (metric_profiles) must mirror telemetry_simulator.PROFILES exactly."""
+    sql = (MIGRATIONS_DIR / "004_db_telemetry_simulator.sql").read_text(encoding="utf-8")
+    db = {(m["category"], m["metric"]): m for m in _PROFILE_ROW.finditer(sql)}
+    expected = {(cat, p.metric_name): (i, p) for cat, profiles in PROFILES.items() for i, p in enumerate(profiles)}
+    assert set(db) == set(expected)
+    for key, (order, p) in expected.items():
+        row = db[key]
+        assert row["unit"] == p.unit, key
+        assert row["direction"] == p.direction, key
+        assert int(row["order"]) == order, key
+        for field, value in (
+            ("nominal", p.nominal),
+            ("sigma", p.sigma),
+            ("warning", p.warning),
+            ("alert", p.alert),
+            ("reversion", p.reversion),
+            ("excursion", p.excursion_probability),
+            ("minimum", p.minimum),
+        ):
+            assert float(row[field]) == pytest.approx(value), (key, field)
+
+
 def test_seed_categories_have_sensor_profiles() -> None:
     rows = _seed_component_rows()
     assert len(rows) >= 36

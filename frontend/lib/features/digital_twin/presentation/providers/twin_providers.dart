@@ -8,7 +8,7 @@ import '../../domain/entities/twin_entities.dart';
 import '../../domain/repositories/twin_repository.dart';
 
 final twinRepositoryProvider = Provider<TwinRepository>((ref) {
-  return TwinRepositoryImpl(supabase: ref.watch(supabaseClientProvider), backend: ref.watch(backendApiClientProvider));
+  return TwinRepositoryImpl(supabase: ref.watch(supabaseClientProvider));
 });
 
 /// Realtime BOM of a project; status changes arrive through Supabase Realtime.
@@ -78,12 +78,20 @@ class SimulationNotifier extends Notifier<SimulationState> {
 
   static const liveInterval = Duration(seconds: 3);
 
+  /// Live mode stops by itself so a forgotten tab cannot fill the database
+  /// (the scheduled database job already adds one reading per metric per minute).
+  static const liveMaxDuration = Duration(minutes: 10);
+
   final String projectId;
   Timer? _timer;
+  Timer? _stopTimer;
 
   @override
   SimulationState build() {
-    ref.onDispose(() => _timer?.cancel());
+    ref.onDispose(() {
+      _timer?.cancel();
+      _stopTimer?.cancel();
+    });
     return const SimulationState();
   }
 
@@ -98,16 +106,21 @@ class SimulationNotifier extends Notifier<SimulationState> {
     } catch (e) {
       if (ref.mounted) state = state.copyWith(running: false, error: '$e', live: false);
       _timer?.cancel();
+      _stopTimer?.cancel();
       return null;
     }
   }
 
   void setLive(bool enabled) {
     _timer?.cancel();
+    _stopTimer?.cancel();
     state = state.copyWith(live: enabled);
     if (enabled) {
       simulateOnce();
       _timer = Timer.periodic(liveInterval, (_) => simulateOnce());
+      _stopTimer = Timer(liveMaxDuration, () {
+        if (ref.mounted) setLive(false);
+      });
     }
   }
 }

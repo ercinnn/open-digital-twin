@@ -455,7 +455,9 @@ class _SimulationControls extends ConsumerWidget {
         ),
         const SizedBox(width: 8),
         Tooltip(
-          message: 'Continuous feed every ${SimulationNotifier.liveInterval.inSeconds}s',
+          message: 'Continuous feed every ${SimulationNotifier.liveInterval.inSeconds}s '
+              '(stops after ${SimulationNotifier.liveMaxDuration.inMinutes} min; '
+              'the database also adds one reading per minute automatically)',
           child: FilterChip(
             selected: sim.live,
             onSelected: canEdit ? notifier.setLive : null,

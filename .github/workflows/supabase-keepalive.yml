@@ -1,0 +1,29 @@
+name: Supabase keep-alive
+
+# Free Supabase projects can be paused after about a week without API traffic.
+# A small read request twice a week keeps the 24/7 sensor simulation (pg_cron) running.
+on:
+  schedule:
+    - cron: "23 6 * * 1,4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read one row through the REST API
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          test -n "$SUPABASE_URL" || { echo "::error::Repository secret SUPABASE_URL is not set"; exit 1; }
+          test -n "$SUPABASE_ANON_KEY" || { echo "::error::Repository secret SUPABASE_ANON_KEY is not set"; exit 1; }
+          status=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/projects?select=id&limit=1")
+          echo "HTTP $status"
+          test "$status" = "200"

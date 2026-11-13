@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/config/app_config.dart';
-import '../../../../core/network/backend_api_client.dart';
 import '../../../../core/status/component_status.dart';
 import '../../../../core/utils/file_utils.dart';
 import '../../domain/entities/twin_entities.dart';
@@ -11,10 +10,9 @@ import '../../domain/repositories/twin_repository.dart';
 import '../models/twin_models.dart';
 
 class TwinRepositoryImpl implements TwinRepository {
-  TwinRepositoryImpl({required this.supabase, required this.backend});
+  TwinRepositoryImpl({required this.supabase});
 
   final SupabaseClient supabase;
-  final BackendApiClient backend;
 
   /// `documents.file_url` may hold a public URL or an object path in `component-docs`.
   String _resolveDocUrl(String value) {
@@ -99,13 +97,18 @@ class TwinRepositoryImpl implements TwinRepository {
     await supabase.from('documents').delete().eq('id', document.id);
   }
 
+  /// Runs the database-side simulator (RPC `simulate_telemetry`, editors only),
+  /// so the button works without the FastAPI backend.
   @override
   Future<SimulationResult> simulateTelemetry(String projectId, {int steps = 1}) async {
-    final json = await backend.postJson(
-      '/api/v1/telemetry/simulate/$projectId',
-      body: {'steps': steps, 'update_status': true},
-      timeout: const Duration(seconds: 30),
-    );
-    return SimulationResultModel.fromJson(json);
+    var readings = 0;
+    final changes = <(String, String, String)>[];
+    for (var i = 0; i < (steps < 1 ? 1 : steps); i++) {
+      final response = await supabase.rpc('simulate_telemetry', params: {'p_project_id': projectId});
+      final result = SimulationResultModel.fromJson(Map<String, dynamic>.from(response as Map));
+      readings += result.readingsInserted;
+      changes.addAll(result.statusChanges);
+    }
+    return SimulationResult(readingsInserted: readings, statusChanges: changes);
   }
 }

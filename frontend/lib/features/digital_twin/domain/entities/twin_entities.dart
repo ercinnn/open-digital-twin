@@ -89,7 +89,8 @@ class TelemetryReading {
   }
 }
 
-/// Result of `POST /api/v1/telemetry/simulate/{project_id}`.
+/// Result of the Supabase RPC `simulate_telemetry` (same shape as the backend's
+/// `POST /api/v1/telemetry/simulate/{project_id}`).
 class SimulationResult {
   const SimulationResult({required this.readingsInserted, required this.statusChanges});
 
