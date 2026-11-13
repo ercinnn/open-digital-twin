@@ -31,14 +31,28 @@ def _pdf_text(value: str) -> str:
 
 
 def build_pdf(title: str, subtitle: str, sections: list[tuple[str, list[str]]]) -> bytes:
+    """A4 report (Helvetica, WinAnsi); content flows onto additional pages when needed."""
     width, height = 595, 842  # A4 in points
-    ops: list[str] = []
+    footer = "Generated " + date.today().isoformat() + "  |  " + DEMO_NOTICE
+    pages: list[list[str]] = [[]]
+    y = 0.0
 
-    def text(x: float, y: float, size: int, value: str, bold: bool = False, gray: float = 0.0) -> None:
+    def text(x: float, y_pos: float, size: float, value: str, bold: bool = False, gray: float = 0.0) -> None:
         font = "F2" if bold else "F1"
-        ops.append(f"BT {gray:.2f} g /{font} {size} Tf {x:.1f} {y:.1f} Td ({_pdf_text(value)}) Tj ET")
+        pages[-1].append(f"BT {gray:.2f} g /{font} {size} Tf {x:.1f} {y_pos:.1f} Td ({_pdf_text(value)}) Tj ET")
+
+    def new_page() -> None:
+        nonlocal y
+        pages.append([])
+        pages[-1].append(f"BT 0.35 g /F1 9 Tf 40 805 Td ({_pdf_text(subtitle + '  (continued)')}) Tj ET")
+        y = 780.0
+
+    def ensure_space(needed: float) -> None:
+        if y - needed < 70:
+            new_page()
 
     # Header band
+    ops = pages[0]
     ops.append("0.07 0.20 0.33 rg 0 772 595 70 re f")
     ops.append(f"BT 1 1 1 rg /F2 18 Tf 40 812 Td ({_pdf_text('OPEN DIGITAL TWIN PLATFORM')}) Tj ET")
     ops.append(f"BT 0.75 0.85 0.95 rg /F1 10 Tf 40 794 Td ({_pdf_text(subtitle)}) Tj ET")
@@ -52,33 +66,39 @@ def build_pdf(title: str, subtitle: str, sections: list[tuple[str, list[str]]]) 
         y -= 22
     y -= 6
     for heading, lines in sections:
-        if y < 90:
-            break
-        ops.append(f"0.85 0.88 0.92 RG 0.8 w 40 {y + 4:.1f} m 555 {y + 4:.1f} l S")
+        ensure_space(44)
+        pages[-1].append(f"0.85 0.88 0.92 RG 0.8 w 40 {y + 4:.1f} m 555 {y + 4:.1f} l S")
         y -= 14
         text(40, y, 11, heading.upper(), bold=True, gray=0.15)
         y -= 16
         for raw in lines:
             for line in textwrap.wrap(raw, 95) or [""]:
-                if y < 70:
-                    break
+                ensure_space(14)
                 text(48, y, 9.5, line, gray=0.1)
                 y -= 13.5
         y -= 8
-    ops.append(f"BT 0.45 g /F1 8 Tf 40 40 Td ({_pdf_text('Generated ' + date.today().isoformat() + '  |  ' + DEMO_NOTICE)}) Tj ET")
 
-    stream = "\n".join(ops).encode("cp1252", errors="replace")
-    objects = [
+    for number, page_ops in enumerate(pages, start=1):
+        label = footer + (f"  |  Page {number}/{len(pages)}" if len(pages) > 1 else "")
+        page_ops.append(f"BT 0.45 g /F1 7.5 Tf 40 40 Td ({_pdf_text(label)}) Tj ET")
+
+    # Objects: 1 catalog, 2 pages, 3 font, 4 bold font, then (page, contents) pairs.
+    page_ids = [5 + 2 * i for i in range(len(pages))]
+    objects: list[bytes] = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        (
-            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] "
-            "/Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>"
-        ).encode(),
+        f"<< /Type /Pages /Kids [{' '.join(f'{pid} 0 R' for pid in page_ids)}] /Count {len(pages)} >>".encode(),
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
     ]
+    for pid, page_ops in zip(page_ids, pages):
+        stream = "\n".join(page_ops).encode("cp1252", errors="replace")
+        objects.append(
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] "
+                f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {pid + 1} 0 R >>"
+            ).encode()
+        )
+        objects.append(b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream")
     out = io.BytesIO()
     out.write(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = []
@@ -190,7 +210,60 @@ def build_site_photo_png(caption: str, seed: int) -> bytes:
     return _png(img)
 
 
-def build_document(row: dict, component: dict, project: dict) -> tuple[bytes, str]:
+ORG_CHART_ORDER = [
+    "management_support",
+    "material_logistics",
+    "surface_treatment",
+    "steel_fabrication",
+    "block_assembly",
+    "docks_and_berths",
+    "floating_dock",
+    "outfitting_shops",
+    "outfitting_quay",
+    "crane",
+    "hull_structure",
+]
+
+
+def _org_chart_sections(project_components: list[dict]) -> list[tuple[str, list[str]]]:
+    """Organization chart: yard areas grouped by organizational category + the steel production flow."""
+    groups: dict[str, list[dict]] = {}
+    for comp in project_components:
+        groups.setdefault(comp.get("category") or "uncategorized", []).append(comp)
+
+    def sort_key(comp: dict) -> tuple[int, str]:
+        meta = comp.get("metadata") or {}
+        return (int(meta.get("area_no") or 99), comp["mesh_node_id"])
+
+    sections: list[tuple[str, list[str]]] = []
+    for category in sorted(groups, key=lambda c: (ORG_CHART_ORDER.index(c) if c in ORG_CHART_ORDER else 99, c)):
+        lines = []
+        for comp in sorted(groups[category], key=sort_key):
+            meta = comp.get("metadata") or {}
+            unit = meta.get("responsible_unit")
+            capacity = meta.get("capacity")
+            detail = "; ".join(str(v) for v in (unit, capacity) if v)
+            lines.append(f"{comp['name']}" + (f"  -  {detail}" if detail else ""))
+        sections.append((category.replace("_", " "), lines))
+
+    flow = sorted(
+        (c for c in project_components if (c.get("metadata") or {}).get("process_step") is not None),
+        key=lambda c: int(c["metadata"]["process_step"]),
+    )
+    if flow:
+        sections.insert(
+            0,
+            (
+                "Steel production flow",
+                [" -> ".join(f"{c['metadata']['process_step']}. {c['name'].split(' - ', 1)[-1]}" for c in flow)],
+            ),
+        )
+    return sections
+
+
+def build_document(
+    row: dict, component: dict, project: dict, project_components: list[dict] | None = None
+) -> tuple[bytes, str]:
     """Return (bytes, content_type) for a documents row based on its path extension."""
     path: str = row["object_path"]
     title: str = row["title"]
@@ -200,6 +273,10 @@ def build_document(row: dict, component: dict, project: dict) -> tuple[bytes, st
             section = "B" if "section_b" in path.lower() else "A"
             return build_xray_png(component["name"], section, seed), "image/png"
         return build_site_photo_png(title, seed), "image/png"
+
+    subtitle = f"{project['name']}  |  {component['mesh_node_id']}"
+    if path.lower().endswith("yard_organization_chart.pdf") and project_components:
+        return build_pdf(title, subtitle, _org_chart_sections(project_components)), "application/pdf"
 
     meta = component.get("metadata") or {}
     doc_no = f"ODT-{row['doc_type'][:3].upper()}-{zlib.crc32(path.encode()) % 100000:05d}"
@@ -242,5 +319,4 @@ def build_document(row: dict, component: dict, project: dict) -> tuple[bytes, st
         "photo": ["Photo record attached in the digital twin."],
     }[row["doc_type"]]
     sections.append(("Statement" if row["doc_type"] != "manual" else "Contents", findings))
-    subtitle = f"{project['name']}  |  {component['mesh_node_id']}"
     return build_pdf(title, subtitle, sections), "application/pdf"

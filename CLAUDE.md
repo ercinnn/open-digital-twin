@@ -13,7 +13,7 @@ Open-source, license-free **Digital Twin Platform** for Marine Engineering (ship
 - **Database Naming:** ALL PostgreSQL tables, columns, foreign keys, RPCs, and storage buckets MUST be strictly in **English** using `snake_case` (`projects`, `components`, `documents`, `telemetry_logs`, `mesh_node_id`).
 - **3D Mapping Rule:** Every 3D mesh node exported to `.glb` MUST preserve its exact `mesh_node_id` matching the `mesh_node_id` column in Supabase `components`.
   - Node ids are `NODE_<UPPER_SNAKE>` (≤ 60 chars, see `cad_parser.sanitize_node_id`), stored both as the glTF node name and in `extras.mesh_node_id`.
-  - Context-only geometry (not in the BOM) is prefixed `CTX_`; the viewer ghosts it and makes it non-pickable.
+  - Context-only geometry (not in the BOM) is prefixed `CTX_`; the viewer ghosts it and makes it non-pickable (optional glTF extras `ctx_opacity` 0..1 overrides the default 0.16; >= 0.99 renders opaque).
   - The ingest pipeline fails with HTTP 500 if any BOM id is missing from the exported GLB.
 - **Flutter Architecture:** Feature-First Clean Architecture (`data`, `domain`, `presentation`). Provide complete, step-by-step file implementations without placeholders or TODOs.
 - **Secrets:** `SUPABASE_SERVICE_ROLE_KEY` lives ONLY in the root `.env` (backend). `frontend/.env` is bundled into the app as an asset and must contain public values only.
@@ -35,7 +35,7 @@ supabase/
   migrations/001_initial_schema.sql  # tables, indexes, trigger, realtime publication
   migrations/002_rls_policies.sql    # RLS, buckets, storage policies (demo write policies replaced by 003)
   migrations/003_editor_write_policies.sql  # read-only public access, editor-only writes (app_editors)
-  seed.sql                         # 2 demo projects, 7 components, 17 documents, 384 telemetry rows
+  seed.sql                         # 3 demo projects (tug engine room, villa, shipyard), 36 components, 36 documents, 2160 telemetry rows
 backend/
   app/main.py                      # FastAPI app, CORS, GET /health[?deep=true]
   app/config.py                    # .env loading, Blender discovery
@@ -48,10 +48,10 @@ backend/
   app/services/telemetry_simulator.py  # per-category sensor profiles + thresholds
   app/services/supabase_client.py  # service-role client
   app/blender_scripts/convert_to_glb.py          # import, clean, decimate, export GLB
-  app/blender_scripts/generate_sample_models.py  # builds the 2 demo GLBs
+  app/blender_scripts/generate_sample_models.py  # builds the 3 demo GLBs
   scripts/publish_sample_assets.py # uploads demo GLBs + generated demo documents
   scripts/sample_documents.py      # PDF/PNG generators (marked DEMO)
-  sample_models/                   # nb42_engine_room.glb, villa_b04.glb
+  sample_models/                   # nb42_engine_room.glb, villa_b04.glb, demo_shipyard.glb
   tests/test_backend.py
 frontend/
   assets/viewer/index.html, twin_scene.js   # Three.js scene + bridge
@@ -85,6 +85,9 @@ flutter run -d windows         # Desktop (WebView2 via webview_windows)
 # Supabase CLI (installed via scoop: %USERPROFILE%\scoop\shims\supabase.exe)
 supabase link --project-ref unksjqvehethysjubclj -p <SUPABASE_DB_PASSWORD from .env>
 supabase db push --include-seed -p <SUPABASE_DB_PASSWORD>
+# NOTE: the CLI runs a seed file only once. After editing seed.sql it merely records the new hash
+# ("Updating seed hash") without executing it - re-apply seed.sql via the SQL editor or psql
+# (pooler URL in supabase/.temp/pooler-url, sslmode=require). It resets ALL demo projects.
 ```
 
 ## 7. Public Website (GitHub Pages)

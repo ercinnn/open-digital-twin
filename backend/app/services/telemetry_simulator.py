@@ -35,6 +35,16 @@ class MetricProfile:
     minimum: float = 0.0
 
 
+# Shipyard production metrics are normalized (%, days) so shops with different
+# capacities (e.g. 300 t/day blasting line vs 150 t/day CNC) share one profile.
+_CAPACITY_UTILIZATION = MetricProfile("capacity_utilization", "%", 82.0, 1.8, 95.0, 105.0)
+_WIND_SPEED = MetricProfile("wind_speed", "m/s", 7.5, 0.8, 13.8, 20.0)
+_SHOP: list[MetricProfile] = [
+    _CAPACITY_UTILIZATION,
+    MetricProfile("oee", "%", 74.0, 1.2, 65.0, 50.0, direction="low"),
+    MetricProfile("wip_backlog_days", "days", 2.8, 0.15, 5.0, 8.0),
+]
+
 PROFILES: dict[str, list[MetricProfile]] = {
     "propulsion": [
         MetricProfile("engine_speed", "rpm", 898.0, 4.0, 960.0, 1000.0),
@@ -72,6 +82,40 @@ PROFILES: dict[str, list[MetricProfile]] = {
     ],
     "part": [
         MetricProfile("surface_temperature", "°C", 32.0, 0.6, 60.0, 75.0),
+    ],
+    # ---- Shipyard (yard operations + newbuild production flow) ------------
+    "material_logistics": [
+        MetricProfile("storage_occupancy", "%", 68.0, 1.5, 85.0, 95.0),
+        MetricProfile("inventory_cover_days", "days", 14.0, 0.5, 7.0, 3.0, direction="low"),
+    ],
+    "surface_treatment": [
+        MetricProfile("relative_humidity", "%", 62.0, 1.8, 80.0, 85.0),
+        MetricProfile("dew_point_margin", "°C", 6.5, 0.3, 4.0, 3.0, direction="low"),
+        _CAPACITY_UTILIZATION,
+    ],
+    "steel_fabrication": _SHOP,
+    "block_assembly": _SHOP,
+    "outfitting_shops": _SHOP,
+    "docks_and_berths": [
+        _CAPACITY_UTILIZATION,
+        MetricProfile("schedule_variance_days", "days", 0.5, 0.12, 3.0, 7.0),
+    ],
+    "floating_dock": [
+        MetricProfile("list_angle", "°", 0.15, 0.04, 0.5, 1.0),
+        MetricProfile("lifting_load", "t", 8200.0, 120.0, 11000.0, 12000.0),
+    ],
+    "outfitting_quay": [
+        MetricProfile("berth_occupancy", "%", 75.0, 1.5, 90.0, 100.0),
+        MetricProfile("shore_power_load", "kW", 850.0, 40.0, 1600.0, 2000.0),
+    ],
+    "management_support": [
+        MetricProfile("site_power_demand", "kW", 3800.0, 90.0, 5200.0, 6000.0),
+        MetricProfile("open_hse_findings", "count", 2.0, 0.3, 5.0, 10.0),
+    ],
+    "crane": [
+        MetricProfile("hook_load_ratio", "%", 55.0, 3.0, 90.0, 100.0),
+        _WIND_SPEED,
+        MetricProfile("motor_temperature", "°C", 62.0, 1.2, 90.0, 110.0),
     ],
 }
 

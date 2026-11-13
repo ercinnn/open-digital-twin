@@ -128,6 +128,16 @@
       return false;
     }
 
+    // Ghost opacity for CTX_ geometry; a glTF extras value `ctx_opacity` (0..1) overrides the default.
+    function contextOpacity(obj) {
+      while (obj) {
+        var v = obj.userData ? obj.userData.ctx_opacity : undefined;
+        if (typeof v === 'number' && v > 0) return Math.min(v, 1);
+        obj = obj.parent;
+      }
+      return 0.16;
+    }
+
     function forEachMesh(root, fn) {
       root.traverse(function (child) { if (child.isMesh) fn(child); });
     }
@@ -242,11 +252,13 @@
             if (!child.isMesh) return;
             if (Array.isArray(child.material)) child.material = child.material[0];
             if (isContext(child)) {
+              var opacity = contextOpacity(child);
+              var opaque = opacity >= 0.99;
               child.material = new THREE.MeshStandardMaterial({
                 color: child.material.color ? child.material.color.clone() : new THREE.Color(0xcbd5e1),
-                transparent: true, opacity: 0.16, depthWrite: false, roughness: 0.9,
+                transparent: !opaque, opacity: opaque ? 1 : opacity, depthWrite: opaque, roughness: 0.9,
               });
-              child.renderOrder = 1;
+              child.renderOrder = opaque ? 0 : 1;
               return;
             }
             child.userData.originalMaterial = child.material;

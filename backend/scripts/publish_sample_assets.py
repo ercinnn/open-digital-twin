@@ -26,6 +26,7 @@ from scripts.sample_documents import build_document
 DEMO_MODELS = {
     "11111111-1111-1111-1111-111111111111": "nb42_engine_room.glb",
     "22222222-2222-2222-2222-222222222222": "villa_b04.glb",
+    "33333333-3333-3333-3333-333333333333": "demo_shipyard.glb",
 }
 
 
@@ -86,8 +87,9 @@ def publish_documents(force: bool) -> None:
         else:
             object_path = file_url.lstrip("/")
         component = components[doc["component_id"]]
+        siblings = [c for c in components.values() if c["project_id"] == component["project_id"]]
         payload, content_type = build_document(
-            {**doc, "object_path": object_path}, component, projects[component["project_id"]]
+            {**doc, "object_path": object_path}, component, projects[component["project_id"]], siblings
         )
         upload_bytes(settings.docs_bucket, object_path, payload, content_type)
         url = public_url(settings.docs_bucket, object_path)

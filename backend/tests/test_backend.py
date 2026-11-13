@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import re
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,27 @@ def test_parse_obj_preserves_names_and_volume(tmp_path: Path) -> None:
     assert set(result.scene.graph.nodes_geometry) == set(by_id)
 
 
+SEED_SQL = Path(__file__).resolve().parents[2] / "supabase" / "seed.sql"
+_COMPONENT_ROW = re.compile(
+    r"\(\s*'[0-9a-f-]{36}',\s*'(?P<project>[0-9a-f-]{36})',\s*'(?P<node>NODE_[A-Z0-9_]+)',\s*'[^']*',\s*'(?P<category>[a-z_]+)'"
+)
+
+
+def _seed_component_rows() -> list[re.Match[str]]:
+    return list(_COMPONENT_ROW.finditer(SEED_SQL.read_text(encoding="utf-8")))
+
+
+def _seed_mesh_node_ids(project_id: str) -> list[str]:
+    return [m["node"] for m in _seed_component_rows() if m["project"] == project_id]
+
+
+def test_seed_categories_have_sensor_profiles() -> None:
+    rows = _seed_component_rows()
+    assert len(rows) >= 36
+    missing = {m["category"] for m in rows} - set(PROFILES)
+    assert not missing, f"Seed categories without a telemetry profile: {sorted(missing)}"
+
+
 def test_sample_models_satisfy_mapping_contract() -> None:
     expected = {
         "nb42_engine_room.glb": {
@@ -60,7 +82,9 @@ def test_sample_models_satisfy_mapping_contract() -> None:
             "NODE_FUEL_PURIFIER_01",
         },
         "villa_b04.glb": {"NODE_RC_COLUMN_S01", "NODE_HEAT_PUMP_UNIT", "NODE_CONCEALED_PIPE_KITCHEN"},
+        "demo_shipyard.glb": set(_seed_mesh_node_ids("33333333-3333-3333-3333-333333333333")),
     }
+    assert len(expected["demo_shipyard.glb"]) == 29
     for filename, nodes in expected.items():
         path = SAMPLE_MODELS_DIR / filename
         if not path.exists():
