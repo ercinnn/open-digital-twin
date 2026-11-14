@@ -56,7 +56,13 @@ class IngestNotifier extends Notifier<IngestState> {
         phase: IngestPhase.ingesting,
         message: 'Parsing BOM & optimizing mesh (Headless Blender) ...',
       );
-      final summary = await repo.triggerIngest(projectId, storagePath: storagePath);
+      final summary = await repo.triggerIngest(
+        projectId,
+        storagePath: storagePath,
+        onProgress: (message) {
+          if (ref.mounted) state = IngestState(phase: IngestPhase.ingesting, message: message);
+        },
+      );
       state = IngestState(
         phase: IngestPhase.done,
         summary: summary,

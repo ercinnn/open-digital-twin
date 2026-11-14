@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import random
 import re
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import trimesh
 from fastapi.testclient import TestClient
 
+from app import auth as auth_module
 from app.config import SAMPLE_MODELS_DIR
 from app.main import app
+from app.routers import ingest as ingest_router
 from app.services.cad_parser import CadParseError, parse_cad_file, sanitize_node_id
-from app.services.ingest_service import normalize_storage_path
+from app.services.ingest_service import IngestError, normalize_storage_path
 from app.services.telemetry_simulator import PROFILES, MetricProfile, level_for, next_value, worst_level
 
 
@@ -122,6 +126,119 @@ def test_sample_models_satisfy_mapping_contract() -> None:
             pytest.skip("Sample models not generated yet")
         scene = trimesh.load(str(path), force="scene")
         assert nodes <= set(scene.graph.nodes_geometry)
+
+
+PROJECT_ID = "33333333-3333-3333-3333-333333333333"
+
+
+class _FakeTable:
+    def __init__(self, rows: list[dict]) -> None:
+        self._rows = rows
+
+    def select(self, *_args, **_kwargs) -> "_FakeTable":
+        return self
+
+    def eq(self, *_args, **_kwargs) -> "_FakeTable":
+        return self
+
+    def limit(self, *_args, **_kwargs) -> "_FakeTable":
+        return self
+
+    def execute(self) -> SimpleNamespace:
+        return SimpleNamespace(data=self._rows)
+
+
+class _FakeSupabase:
+    """Accepts the token 'good' for user u1; u1 is an editor when `is_editor` is True."""
+
+    def __init__(self, is_editor: bool) -> None:
+        self._is_editor = is_editor
+        self.auth = SimpleNamespace(get_user=self._get_user)
+
+    @staticmethod
+    def _get_user(token: str) -> SimpleNamespace:
+        if token != "good":
+            raise ValueError("invalid JWT")
+        return SimpleNamespace(user=SimpleNamespace(id="u1"))
+
+    def table(self, _name: str) -> _FakeTable:
+        return _FakeTable([{"user_id": "u1"}] if self._is_editor else [])
+
+
+def test_api_requires_editor_token() -> None:
+    client = TestClient(app)
+    assert client.post(f"/api/v1/ingest/{PROJECT_ID}/jobs").status_code == 401
+    assert client.post(f"/api/v1/ingest/{PROJECT_ID}").status_code == 401
+    assert client.get("/api/v1/ingest/jobs/abc").status_code == 401
+    assert client.post(f"/api/v1/telemetry/simulate/{PROJECT_ID}").status_code == 401
+    assert client.get("/health").status_code == 200
+
+
+def test_invalid_token_and_non_editor_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(app)
+    monkeypatch.setattr(auth_module, "get_supabase", lambda: _FakeSupabase(is_editor=False))
+    bad = client.post(f"/api/v1/ingest/{PROJECT_ID}/jobs", headers={"Authorization": "Bearer nope"})
+    assert bad.status_code == 401
+    forbidden = client.post(f"/api/v1/ingest/{PROJECT_ID}/jobs", headers={"Authorization": "Bearer good"})
+    assert forbidden.status_code == 403
+
+
+def test_ingest_job_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(app)
+    monkeypatch.setattr(auth_module, "get_supabase", lambda: _FakeSupabase(is_editor=True))
+    fake_result = {
+        "project_id": PROJECT_ID,
+        "source_path": f"{PROJECT_ID}/model.step",
+        "source_format": "step",
+        "unit_scale": 0.001,
+        "optimizer": "blender",
+        "glb_model_url": "https://example.invalid/model.glb",
+        "glb_size_bytes": 1234,
+        "components_upserted": 3,
+        "stale_components": [],
+        "stale_pruned": False,
+        "mesh_node_ids": ["NODE_A", "NODE_B", "NODE_C"],
+        "node_report": [],
+        "warnings": [],
+        "elapsed_s": 0.1,
+    }
+    monkeypatch.setattr(ingest_router, "run_ingest", lambda *args: fake_result)
+    headers = {"Authorization": "Bearer good"}
+
+    started = client.post(f"/api/v1/ingest/{PROJECT_ID}/jobs", headers=headers, json={})
+    assert started.status_code == 202
+    job_id = started.json()["job_id"]
+
+    body: dict = {}
+    for _ in range(100):
+        body = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers).json()
+        if body["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.02)
+    assert body["status"] == "succeeded", body
+    assert body["result"]["components_upserted"] == 3
+    assert client.get("/api/v1/ingest/jobs/unknown", headers=headers).status_code == 404
+
+
+def test_failed_ingest_job_reports_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(app)
+    monkeypatch.setattr(auth_module, "get_supabase", lambda: _FakeSupabase(is_editor=True))
+
+    def boom(*_args):
+        raise IngestError(422, "No mesh geometry found")
+
+    monkeypatch.setattr(ingest_router, "run_ingest", boom)
+    headers = {"Authorization": "Bearer good"}
+    job_id = client.post(f"/api/v1/ingest/{PROJECT_ID}/jobs", headers=headers).json()["job_id"]
+    body: dict = {}
+    for _ in range(100):
+        body = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers).json()
+        if body["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.02)
+    assert body["status"] == "failed"
+    assert body["error_status"] == 422
+    assert "No mesh geometry" in body["error"]
 
 
 def test_unsupported_extension() -> None:

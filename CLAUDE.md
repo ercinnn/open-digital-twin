@@ -18,11 +18,12 @@ Open-source, license-free **Digital Twin Platform** for Marine Engineering (ship
 - **Flutter Architecture:** Feature-First Clean Architecture (`data`, `domain`, `presentation`). Provide complete, step-by-step file implementations without placeholders or TODOs.
 - **Secrets:** `SUPABASE_SERVICE_ROLE_KEY` lives ONLY in the root `.env` (backend). `frontend/.env` is bundled into the app as an asset and must contain public values only.
 - **Access model (migration 003):** `anon` + `authenticated` can only SELECT. Writes require an editor: an authenticated user listed in `public.app_editors` (checked by RPC `is_editor()`). Signing up alone grants nothing. The UI hides/disables write controls unless `isEditorProvider` is true. Add an editor with: `insert into public.app_editors (user_id) select id from auth.users where email = '<email>';`
+- **Backend auth:** every FastAPI endpoint except `/health` requires `Authorization: Bearer <Supabase access token>` of an editor (`app/auth.py`: token validated by Supabase Auth + row in `app_editors`). The Flutter `BackendApiClient` sends the current session token. `AUTH_REQUIRED=false` disables this for isolated local experiments only. CORS: `CORS_ORIGINS` (exact) + `CORS_ORIGIN_REGEX`; no cookies/credentials.
 - **Status values:** `normal` (green), `in_progress` (blue), `warning` (orange), `alert` (pulsing red). Sensor simulation never overwrites `in_progress`.
 
 ## 4. Core Pipeline
 1. Upload `.step` / `.ifc` / `.ocx` / `.obj` / `.stl` to Supabase Storage bucket `raw-cad-files` (path `<project_id>/<file>`; saved in `projects.raw_file_url`).
-2. Trigger `POST /api/v1/ingest/{project_id}` -> `cad_parser.py` tessellates + extracts BOM into `components` (upsert on `(project_id, mesh_node_id)`), Headless Blender (`convert_to_glb.py`) cleans/decimates and exports `.glb` to `processed-models/<project_id>/model.glb`; `projects.glb_model_url` is updated.
+2. The app starts a background job `POST /api/v1/ingest/{project_id}/jobs` (202) and polls `GET /api/v1/ingest/jobs/{job_id}` (jobs run one at a time, kept in memory - a server restart forgets them; the synchronous `POST /api/v1/ingest/{project_id}` remains for scripts) -> `cad_parser.py` tessellates + extracts BOM into `components` (upsert on `(project_id, mesh_node_id)`), Headless Blender (`convert_to_glb.py`) cleans/decimates and exports `.glb` to `processed-models/<project_id>/model.glb`; `projects.glb_model_url` is updated.
 3. Flutter loads `.glb` in Three.js. Clicking a mesh emits `node_selected` with `mesh_node_id` to load component details, documents, and live telemetry.
 4. Supabase Realtime updates on `components.status` dynamically recolor the corresponding 3D mesh node.
 5. Sensor simulation runs IN THE DATABASE (migration 004): pg_cron job `odt_simulate_telemetry` inserts one reading per metric per minute for every project and derives `components.status` from `public.metric_profiles` thresholds; `odt_telemetry_retention` deletes `telemetry_logs` older than 4 days (hourly); `odt_cron_history_cleanup` trims `cron.job_run_details`. The app button calls RPC `simulate_telemetry(p_project_id)` (editors only); "Live" mode auto-stops after 10 min. The Python simulator (`POST /api/v1/telemetry/simulate/{project_id}`) remains for local use; `metric_profiles` MUST mirror `telemetry_simulator.PROFILES` (enforced by a backend test) - change both together via a new migration.
@@ -40,10 +41,14 @@ supabase/
   migrations/004_db_telemetry_simulator.sql # metric_profiles, simulate_telemetry RPC, pg_cron (1/min, 4-day retention)
   seed.sql                         # 3 demo projects (tug engine room, villa, shipyard), 36 components, 36 documents, 2160 telemetry rows
 backend/
+  Dockerfile, .dockerignore        # python:3.11-slim + Blender 4.2 LTS (Linux), port $PORT (default 7860); not deployed yet
+  requirements-deploy.txt          # huggingface_hub (deploy tooling, not in the image)
   app/main.py                      # FastAPI app, CORS, GET /health[?deep=true]
-  app/config.py                    # .env loading, Blender discovery
+  app/auth.py                      # require_editor dependency (Supabase token + app_editors)
+  app/config.py                    # .env loading, Blender discovery, CORS/auth settings
   app/schemas.py                   # Pydantic request/response models
-  app/routers/ingest.py            # POST /api/v1/ingest/{project_id}
+  app/routers/ingest.py            # ingest jobs (POST .../{project_id}/jobs, GET .../jobs/{job_id}) + sync POST
+  app/services/ingest_jobs.py      # in-memory single-worker job runner
   app/routers/telemetry.py         # POST /api/v1/telemetry/simulate/{project_id}
   app/services/cad_parser.py       # STEP/IFC/OCX/OBJ/STL -> BOM + named trimesh Scene (Y-up)
   app/services/blender_runner.py   # subprocess wrapper for Headless Blender
@@ -52,6 +57,7 @@ backend/
   app/services/supabase_client.py  # service-role client
   app/blender_scripts/convert_to_glb.py          # import, clean, decimate, export GLB
   app/blender_scripts/generate_sample_models.py  # builds the 3 demo GLBs
+  scripts/deploy_hf_space.py       # creates/updates a Hugging Face Docker Space (needs HF PRO)
   scripts/publish_sample_assets.py # uploads demo GLBs + generated demo documents
   scripts/sample_documents.py      # PDF/PNG generators (marked DEMO)
   sample_models/                   # nb42_engine_room.glb, villa_b04.glb, demo_shipyard.glb
@@ -73,6 +79,11 @@ py -3.11 -m venv .venv                     # first time only
 .venv\Scripts\python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 curl http://localhost:8000/health?deep=true
 .venv\Scripts\python -m pytest -q
+
+# OPTIONAL - deploy the backend to a Hugging Face Docker Space (requires HF PRO; HF_TOKEN with write access
+# in the ROOT .env, never frontend/.env; optional HF_SPACE=<owner>/<name>). First Docker build ~10-15 min.
+.venv\Scripts\python -m pip install -r requirements-deploy.txt
+.venv\Scripts\python -m scripts.deploy_hf_space --wait          # --skip-secrets: code only
 
 # Regenerate demo GLBs with Headless Blender + publish models/documents to Supabase
 "C:\Program Files\Blender Foundation\Blender 4.2\blender.exe" --background --factory-startup --python-exit-code 1 --python app/blender_scripts/generate_sample_models.py
@@ -97,7 +108,7 @@ supabase db push --include-seed -p <SUPABASE_DB_PASSWORD>
 - URL: https://ercinnn.github.io/open-digital-twin/ — built by `.github/workflows/deploy-web.yml` on every push to `main` touching `frontend/**`.
 - CI injects config with `--dart-define` from repository secrets `SUPABASE_URL`, `SUPABASE_ANON_KEY` (optional repo variable `BACKEND_URL`, default `http://localhost:8000`). `AppConfig` prefers dart-defines and falls back to `frontend/.env`.
 - Built with `--base-href /open-digital-twin/`. Locally in Git Bash prefix with `MSYS_NO_PATHCONV=1` or the path gets mangled.
-- Ingest calls the FastAPI backend, so on the public site it only works for an editor who runs the backend on their own machine. "Simulate Live Sensor" uses the Supabase RPC and works anywhere for editors; telemetry also updates every minute without any user.
+- Ingest calls the FastAPI backend, which currently runs ONLY locally (`BACKEND_URL` default `http://localhost:8000`): on the public site it works for a signed-in editor whose own machine runs the backend. The code is cloud-ready (`backend/Dockerfile`, editor auth, background jobs, the app waits on `/health` while a sleeping instance wakes); hosting options are in `ROADMAP.md`. Hugging Face Docker Spaces need a PRO subscription (free cpu-basic returns 402) - `scripts/deploy_hf_space.py` only works with PRO. "Simulate Live Sensor" uses the Supabase RPC; telemetry also updates every minute without any user.
 
 ## 8. Sensor / Telemetry Integration Contract
 Real sensors replace the simulator; the app needs no changes as long as readings land in `telemetry_logs`.

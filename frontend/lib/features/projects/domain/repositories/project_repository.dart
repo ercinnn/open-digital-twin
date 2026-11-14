@@ -35,6 +35,12 @@ abstract interface class ProjectRepository {
   /// Uploads a CAD file to `raw-cad-files` and stores its path in `projects.raw_file_url`.
   Future<String> uploadRawCadFile({required String projectId, required String fileName, required Uint8List bytes});
 
-  /// Calls `POST /api/v1/ingest/{project_id}`.
-  Future<IngestSummary> triggerIngest(String projectId, {String? storagePath});
+  /// Starts a backend ingest job (`POST /api/v1/ingest/{project_id}/jobs`) and polls
+  /// `GET /api/v1/ingest/jobs/{job_id}` until it finishes. [onProgress] receives
+  /// human-readable progress (backend wake-up, queue, processing).
+  Future<IngestSummary> triggerIngest(
+    String projectId, {
+    String? storagePath,
+    void Function(String message)? onProgress,
+  });
 }

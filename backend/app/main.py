@@ -28,12 +28,14 @@ app = FastAPI(
     description="CAD/BIM ingest (STEP, IFC, OCX, OBJ, STL) -> BOM + Blender-optimized GLB, and live telemetry simulation.",
 )
 
+# Auth uses bearer tokens (no cookies), so credentials are never needed cross-origin.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials="*" not in settings.cors_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origin_regex=settings.cors_origin_regex,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 app.include_router(ingest.router)

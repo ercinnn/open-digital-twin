@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -42,6 +43,18 @@ class IngestResponse(BaseModel):
     node_report: list[dict[str, Any]]
     warnings: list[str]
     elapsed_s: float
+
+
+class IngestJobResponse(BaseModel):
+    job_id: str
+    project_id: str
+    status: str = Field(description="queued | running | succeeded | failed")
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    result: IngestResponse | None = None
+    error: str | None = None
+    error_status: int | None = Field(default=None, description="HTTP-style status of a failed job.")
 
 
 class SimulateRequest(BaseModel):

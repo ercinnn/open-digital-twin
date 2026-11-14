@@ -1,0 +1,2 @@
+# Tools for deploying the backend (not installed in the container image).
+huggingface_hub>=0.26

@@ -12,9 +12,16 @@ Bir madde tamamlandığında buradan silinip ilgili açıklama `CLAUDE.md`'ye ta
 - [ ] **Veritabanı boyutunu izlemek:** simülatör günde ~130 bin satır yazıyor (4 gün saklama ≈ 100–190 MB). Yeni proje/metrik
       eklenirse `odt_telemetry_retention` süresi yeniden hesaplanmalı.
 
-- [ ] **CAD işlemeyi buluta taşımak:** FastAPI + Blender için Docker imajı (Cloud Run / Render / VPS, ~1–2 GB RAM).
-      Önce backend uç noktalarına kimlik doğrulama eklenmeli (Supabase JWT + `is_editor()`); şu an backend
-      sadece yerel çalıştığı için yetki kontrolü yok.
+- [ ] **CAD işlemeyi (ingest) buluta taşımak:** kod hazır – editör girişi kontrolü (`app/auth.py`), arka plan işleri,
+      `backend/Dockerfile` (Blender 4.2 LTS Linux), uygulama uyuyan sunucunun uyanmasını bekliyor. Sadece barındırma seçilmeli
+      (Kasım 2026 fiyatları, uygulamadan önce tekrar kontrol edilmeli):
+  - Google Cloud Run: kart gerekir; instance-based billing aylık 240k vCPU-sn ücretsiz kota, imaj deposu için birkaç sent.
+    Arka plan işleri yanıt döndükten sonra da CPU istediği için `--no-cpu-throttling` (instance-based) kullanılmalı.
+  - Hetzner VPS CX23 (2 vCPU / 4 GB): ~€5,5–6/ay, sürekli açık.
+  - Hugging Face Docker Space: PRO (~9 $/ay) gerekir; `scripts/deploy_hf_space.py` hazır.
+  - Barındırma sonrası: GitHub repo değişkeni `BACKEND_URL`, sunucuda `CORS_ORIGINS=https://ercinnn.github.io`.
+- [ ] **Ingest işlerini kalıcı yapmak:** işler bellekte tutuluyor; sunucu yeniden başlarsa yarım kalan iş kaybolur
+      (kullanıcı tekrar başlatır). Gerekirse `ingest_jobs` tablosuna taşınabilir.
 - [ ] **Gerçek sensör entegrasyonu** (ayrıntılar `CLAUDE.md` → "Sensor / Telemetry Integration Contract"):
   - [ ] Eşik kontrolünü veritabanına taşımak: `telemetry_logs` insert tetikleyicisi, `metric_profiles` eşiklerine göre
         `components.status` günceller (`in_progress` hariç). Böylece gerçek sensör verisi de 3D'de renk değiştirir.

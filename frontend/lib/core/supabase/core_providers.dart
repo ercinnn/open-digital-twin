@@ -12,7 +12,11 @@ final appConfigProvider = Provider<AppConfig>(
 final supabaseClientProvider = Provider<SupabaseClient>((ref) => Supabase.instance.client);
 
 final backendApiClientProvider = Provider<BackendApiClient>((ref) {
-  final client = BackendApiClient(baseUrl: ref.watch(appConfigProvider).backendUrl);
+  final supabase = ref.watch(supabaseClientProvider);
+  final client = BackendApiClient(
+    baseUrl: ref.watch(appConfigProvider).backendUrl,
+    accessToken: () => supabase.auth.currentSession?.accessToken,
+  );
   ref.onDispose(client.close);
   return client;
 });

@@ -52,6 +52,8 @@ class Settings:
     supabase_service_role_key: str
     blender_path: str | None
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    cors_origin_regex: str | None = None
+    auth_required: bool = True
     raw_bucket: str = "raw-cad-files"
     models_bucket: str = "processed-models"
     docs_bucket: str = "component-docs"
@@ -71,6 +73,10 @@ def get_settings() -> Settings:
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip(),
         blender_path=resolve_blender_path(),
         cors_origins=origins or ["*"],
+        cors_origin_regex=os.getenv("CORS_ORIGIN_REGEX", "").strip() or None,
+        # Every API call except /health needs a Supabase session of an editor (public.app_editors).
+        # Only disable for isolated local experiments.
+        auth_required=os.getenv("AUTH_REQUIRED", "true").strip().lower() not in ("0", "false", "no"),
         max_faces_per_node=int(os.getenv("MAX_FACES_PER_NODE", "60000")),
         blender_timeout_s=int(os.getenv("BLENDER_TIMEOUT_S", "900")),
     )

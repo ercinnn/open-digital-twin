@@ -74,9 +74,46 @@ class ProjectRepositoryImpl implements ProjectRepository {
     return path;
   }
 
+  static const _pollInterval = Duration(seconds: 3);
+  static const _maxJobDuration = Duration(minutes: 30);
+
   @override
-  Future<IngestSummary> triggerIngest(String projectId, {String? storagePath}) async {
-    final json = await backend.postJson('/api/v1/ingest/$projectId', body: {'storage_path': ?storagePath});
-    return IngestSummaryModel.fromJson(json);
+  Future<IngestSummary> triggerIngest(
+    String projectId, {
+    String? storagePath,
+    void Function(String message)? onProgress,
+  }) async {
+    onProgress?.call('Connecting to the backend ...');
+    await backend.waitUntilReady(
+      onWaiting: (waited) =>
+          onProgress?.call('Waking up the cloud backend (${waited.inSeconds} s, usually 1-2 min) ...'),
+    );
+
+    final job = await backend.postJson(
+      '/api/v1/ingest/$projectId/jobs',
+      body: {'storage_path': ?storagePath},
+      timeout: const Duration(minutes: 2),
+    );
+    final jobId = job['job_id'] as String;
+    final started = DateTime.now();
+
+    while (true) {
+      final status = await backend.getJson('/api/v1/ingest/jobs/$jobId');
+      final elapsed = DateTime.now().difference(started).inSeconds;
+      switch (status['status']) {
+        case 'succeeded':
+          return IngestSummaryModel.fromJson(Map<String, dynamic>.from(status['result'] as Map));
+        case 'failed':
+          throw BackendException((status['error_status'] as num?)?.toInt() ?? 500, '${status['error']}');
+        case 'queued':
+          onProgress?.call('Waiting for another ingest to finish ($elapsed s) ...');
+        default:
+          onProgress?.call('Parsing BOM & optimizing mesh (Headless Blender, $elapsed s) ...');
+      }
+      if (DateTime.now().difference(started) > _maxJobDuration) {
+        throw const BackendException(0, 'Ingest did not finish within 30 minutes.');
+      }
+      await Future<void>.delayed(_pollInterval);
+    }
   }
 }
