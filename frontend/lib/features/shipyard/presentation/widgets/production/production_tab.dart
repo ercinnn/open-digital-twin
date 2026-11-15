@@ -11,6 +11,8 @@ import '../../../domain/services/production_schedule.dart';
 import '../../providers/shipyard_providers.dart';
 import '../scene_actions.dart';
 import 'activity_dialog.dart';
+import 'activity_form_dialog.dart';
+import 'draft_schedule_dialog.dart';
 import 'gantt_chart.dart';
 import 'hull_dialog.dart';
 import 'timeline_bar.dart';
@@ -93,7 +95,14 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     PlacementKind.area => '${p.ghost ? 'Parts at ' : 'At '}${shortComponentName(byNode[p.areaNodeId], fallback: p.areaNodeId)}',
   };
 
-  void _onTap(ProductionActivity a, Map<String, TwinComponent> byId, Map<String, TwinComponent> byNode) {
+  Future<void> _onTap(
+    ProductionActivity a,
+    Map<String, TwinComponent> byId,
+    Map<String, TwinComponent> byNode,
+    List<Hull> hulls,
+    List<TwinComponent> components,
+    List<ProductionActivity> activities,
+  ) async {
     setState(() => _selectedActivityId = a.id);
     final block = a.componentId == null ? null : byId[a.componentId];
     if (block != null) {
@@ -101,13 +110,92 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     } else if (a.locationNodeId != null && byNode.containsKey(a.locationNodeId)) {
       widget.actions.selectNode(a.locationNodeId!);
     }
-    ActivityDialog.show(
+    final result = await ActivityDialog.show(
       context,
       activity: a,
       blockName: block?.name,
       locationName: a.locationNodeId == null ? null : byNode[a.locationNodeId]?.name,
     );
+    if (!mounted) return;
+    switch (result) {
+      case ActivityDialogResult.editPlan:
+        await ActivityFormDialog.show(
+          context,
+          projectId: widget.projectId,
+          hulls: hulls,
+          areas: yardAreas(components),
+          existing: activities,
+          activity: a,
+        );
+      case ActivityDialogResult.deleted:
+        setState(() => _selectedActivityId = null);
+        _snack('${a.code} deleted.');
+      case null:
+        break;
+    }
   }
+
+  void _snack(String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+
+  Future<void> _addActivity(List<Hull> hulls, List<TwinComponent> components, List<ProductionActivity> activities) async {
+    final saved = await ActivityFormDialog.show(
+      context,
+      projectId: widget.projectId,
+      hulls: hulls,
+      areas: yardAreas(components),
+      existing: activities,
+      initialHullId: _hullFilter,
+    );
+    if (saved == true && mounted) _snack('Activity added.');
+  }
+
+  Future<void> _draftSchedule(List<Hull> hulls, List<TwinComponent> components, List<ProductionActivity> activities) async {
+    final hullId = await DraftScheduleDialog.show(
+      context,
+      hulls: hulls,
+      existing: activities,
+      areas: yardAreas(components),
+      initialHullId: _hullFilter,
+    );
+    if (hullId == null || !mounted) return;
+    // Show the new plan on its own.
+    setState(() => _hullFilter = hullId);
+    _snack('Draft schedule created. Tap a bar to adjust or delete it.');
+  }
+
+  Widget _planMenu(List<Hull> hulls, List<TwinComponent> components, List<ProductionActivity> activities) =>
+      PopupMenuButton<String>(
+        tooltip: 'Plan activities',
+        onSelected: (v) => v == 'add'
+            ? _addActivity(hulls, components, activities)
+            : _draftSchedule(hulls, components, activities),
+        itemBuilder: (_) => const [
+          PopupMenuItem(
+            value: 'add',
+            child: ListTile(dense: true, leading: Icon(Icons.add_task), title: Text('Add activity…')),
+          ),
+          PopupMenuItem(
+            value: 'draft',
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.auto_awesome_motion_outlined),
+              title: Text('Draft schedule from milestones…'),
+            ),
+          ),
+        ],
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.edit_calendar_outlined, size: 18),
+              SizedBox(width: 4),
+              Text('Plan'),
+              Icon(Icons.arrow_drop_down, size: 18),
+            ],
+          ),
+        ),
+      );
 
   Future<void> _newHull(List<Hull> hulls, List<TwinComponent> components) async {
     final hull = await HullDialog.show(
@@ -162,7 +250,13 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
               alignment: Alignment.centerRight,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(10, 6, 6, 0),
-                child: _newHullButton(hulls.value!, components),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _planMenu(hulls.value!, components, activities.value!),
+                    _newHullButton(hulls.value!, components),
+                  ],
+                ),
               ),
             ),
           const Expanded(
@@ -234,7 +328,10 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
                 onPressed: () => _gantt.currentState?.scrollToDate(sceneDate),
                 icon: const Icon(Icons.center_focus_strong, size: 18),
               ),
-              if (canEdit) _newHullButton(hullList, components),
+              if (canEdit) ...[
+                _planMenu(hullList, components, activities.value!),
+                _newHullButton(hullList, components),
+              ],
             ],
           ),
         ),
@@ -251,7 +348,7 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
             selectedActivityId: _selectedActivityId,
             highlightComponentId: selectedComponent?.id,
             onScrub: (d) => ref.read(timelineProvider(projectId).notifier).setDate(d),
-            onTapActivity: (a) => _onTap(a, byId, byNode),
+            onTapActivity: (a) => _onTap(a, byId, byNode, hullList, components, activities.value!),
           ),
         ),
       ],

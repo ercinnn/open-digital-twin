@@ -79,6 +79,26 @@ class ProductionActivityModel {
     notes: json['notes'] as String?,
   );
 
+  /// Row for `insert into production_activities`.
+  static Map<String, dynamic> insert(ActivityDraft d) => {
+    'project_id': d.projectId,
+    'hull_id': d.hullId,
+    'component_id': d.componentId,
+    'activity_code': d.code.trim(),
+    'sort_order': d.sortOrder,
+    ...planUpdate(d),
+  };
+
+  /// Plan columns an editor may change (progress and actual dates stay untouched).
+  static Map<String, dynamic> planUpdate(ActivityDraft d) => {
+    'name': d.name.trim(),
+    'stage': d.stage.dbValue,
+    'location_node_id': d.locationNodeId,
+    'planned_start': writeDate(d.plannedStart),
+    'planned_end': writeDate(d.plannedEnd),
+    'notes': d.notes == null || d.notes!.trim().isEmpty ? null : d.notes!.trim(),
+  };
+
   /// Columns an editor may change from the app.
   static Map<String, dynamic> progressUpdate(ProductionActivity a) => {
     'progress_pct': a.progressPct,

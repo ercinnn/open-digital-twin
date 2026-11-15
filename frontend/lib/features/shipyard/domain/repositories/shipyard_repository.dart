@@ -31,6 +31,15 @@ abstract interface class ShipyardRepository {
 
   Future<void> updateActivityProgress(ProductionActivity activity);
 
+  /// Inserts schedule rows in one request (all or nothing). Throws [ShipyardException].
+  Future<void> createActivities(List<ActivityDraft> drafts);
+
+  /// Changes name, stage, location and planned dates of a schedule row.
+  Future<void> updateActivityPlan(String activityId, ActivityDraft draft);
+
+  /// Deletes a schedule row (linked resource bookings keep their time, the link is cleared).
+  Future<void> deleteActivity(String activityId);
+
   // ---- Organization (006) -----------------------------------------------------
   Future<Organization> fetchOrganization(String projectId);
 

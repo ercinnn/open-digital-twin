@@ -4,9 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../../core/theme/app_theme.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../domain/entities/production_entities.dart';
+import '../../../domain/repositories/shipyard_repository.dart';
 import '../../providers/shipyard_providers.dart';
 
-/// Details of one schedule row; editors can report progress and actual dates.
+/// What the caller should do after [ActivityDialog] closed.
+enum ActivityDialogResult { editPlan, deleted }
+
+/// Details of one schedule row; editors can report progress and actual dates,
+/// open the plan editor or delete the row.
 class ActivityDialog extends ConsumerStatefulWidget {
   const ActivityDialog({super.key, required this.activity, required this.locationName, this.blockName});
 
@@ -14,13 +19,13 @@ class ActivityDialog extends ConsumerStatefulWidget {
   final String? locationName;
   final String? blockName;
 
-  static Future<void> show(
+  static Future<ActivityDialogResult?> show(
     BuildContext context, {
     required ProductionActivity activity,
     String? locationName,
     String? blockName,
   }) {
-    return showDialog<void>(
+    return showDialog<ActivityDialogResult>(
       context: context,
       builder: (_) => ActivityDialog(activity: activity, locationName: locationName, blockName: blockName),
     );
@@ -56,6 +61,40 @@ class _ActivityDialogState extends ConsumerState<ActivityDialog> {
           ? _draft.copyWith(actualStart: picked)
           : _draft.copyWith(actualEnd: picked, actualStart: _draft.actualStart ?? picked, progressPct: 100);
     });
+  }
+
+  Future<void> _delete() async {
+    final a = widget.activity;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete activity?'),
+        content: Text(
+          '${a.code} · ${a.name}\n\nThe row is removed from the schedule. This cannot be undone. '
+          'Crane / dock bookings linked to it are kept without the link.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB91C1C)),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await ref.read(shipyardRepositoryProvider).deleteActivity(a.id);
+      if (mounted) Navigator.of(context).pop(ActivityDialogResult.deleted);
+    } on ShipyardException catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Delete failed: ${e.message}'), backgroundColor: const Color(0xFF7F1D1D)),
+      );
+    }
   }
 
   Future<void> _save() async {
@@ -185,6 +224,16 @@ class _ActivityDialogState extends ConsumerState<ActivityDialog> {
         ),
       ),
       actions: [
+        if (canEdit) ...[
+          TextButton(
+            onPressed: _saving ? null : _delete,
+            child: const Text('Delete', style: TextStyle(color: Color(0xFFFCA5A5))),
+          ),
+          OutlinedButton(
+            onPressed: _saving ? null : () => Navigator.of(context).pop(ActivityDialogResult.editPlan),
+            child: const Text('Edit plan'),
+          ),
+        ],
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(canEdit ? 'Cancel' : 'Close')),
         if (canEdit)
           FilledButton(

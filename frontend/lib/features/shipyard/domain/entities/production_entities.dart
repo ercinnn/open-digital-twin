@@ -243,6 +243,45 @@ class Hull {
       : daysBetween(contractDeliveryDate!, forecastDeliveryDate!);
 }
 
+/// A schedule row entered by an editor (insert / plan update of `production_activities`).
+/// Progress and actual dates are reported separately ([ProductionActivity.copyWith]).
+class ActivityDraft {
+  const ActivityDraft({
+    required this.projectId,
+    required this.hullId,
+    required this.code,
+    required this.name,
+    required this.stage,
+    required this.plannedStart,
+    required this.plannedEnd,
+    this.locationNodeId,
+    this.componentId,
+    this.sortOrder = 0,
+    this.notes,
+  });
+
+  final String projectId;
+  final String? hullId;
+  final String code;
+  final String name;
+  final ProductionStage stage;
+  final DateTime plannedStart;
+  final DateTime plannedEnd;
+  final String? locationNodeId;
+  final String? componentId;
+  final int sortOrder;
+  final String? notes;
+
+  int get plannedDays => daysBetween(plannedStart, plannedEnd);
+
+  /// Human-readable problems; empty when the draft can be saved.
+  List<String> validationErrors() => [
+    if (code.trim().isEmpty) 'The activity code is missing.',
+    if (name.trim().isEmpty) 'Enter a name.',
+    if (plannedEnd.isBefore(plannedStart)) 'Planned end is before the planned start.',
+  ];
+}
+
 /// Table `production_activities` (one Gantt bar).
 class ProductionActivity {
   const ProductionActivity({

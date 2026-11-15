@@ -89,6 +89,37 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
         .eq('id', activity.id);
   }
 
+  @override
+  Future<void> createActivities(List<ActivityDraft> drafts) async {
+    if (drafts.isEmpty) return;
+    try {
+      await supabase.from('production_activities').insert([for (final d in drafts) ProductionActivityModel.insert(d)]);
+    } on PostgrestException catch (e) {
+      if (e.code == '23505') throw const ShipyardException('An activity with this code already exists. Reload and try again.');
+      _rethrow(e);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
+  Future<void> updateActivityPlan(String activityId, ActivityDraft draft) async {
+    try {
+      await supabase.from('production_activities').update(ProductionActivityModel.planUpdate(draft)).eq('id', activityId);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
+  Future<void> deleteActivity(String activityId) async {
+    try {
+      await supabase.from('production_activities').delete().eq('id', activityId);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
   // ---- Organization -------------------------------------------------------------
   @override
   Future<Organization> fetchOrganization(String projectId) async {
