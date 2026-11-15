@@ -49,14 +49,22 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
   }
 
   @override
-  Future<Hull> createHull(HullDraft draft) async {
+  Future<Hull> createHull(HullDraft draft) =>
+      _saveHull(draft, () => supabase.from('hulls').insert(HullModel.insert(draft)).select().single());
+
+  @override
+  Future<Hull> updateHull(String hullId, HullDraft draft) =>
+      _saveHull(draft, () => supabase.from('hulls').update(HullModel.update(draft)).eq('id', hullId).select().single());
+
+  Future<Hull> _saveHull(HullDraft draft, Future<Map<String, dynamic>> Function() write) async {
     try {
-      final row = await supabase.from('hulls').insert(HullModel.insert(draft)).select().single();
-      return HullModel.fromJson(row);
+      return HullModel.fromJson(await write());
     } on PostgrestException catch (e) {
       if (e.code == '23505') {
         throw ShipyardException('Hull number ${draft.normalizedHullNo} already exists in this yard.');
       }
+      // No row returned: RLS hid the update (not an editor) or the hull was deleted meanwhile.
+      if (e.code == 'PGRST116') throw const ShipyardException('Not saved: sign in with an editor account and reload.');
       _rethrow(e);
     } catch (e) {
       _rethrow(e);

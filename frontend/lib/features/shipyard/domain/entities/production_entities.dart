@@ -82,6 +82,9 @@ enum HullContractType {
 
   final String dbValue;
   final String label;
+
+  static HullContractType fromDb(String? value) =>
+      HullContractType.values.firstWhere((t) => t.dbValue == value, orElse: () => HullContractType.newbuild);
 }
 
 /// Mesh categories a hull can lie at (`hulls.location_node_id`).

@@ -103,6 +103,21 @@ void main() {
       expect(row['location_node_id'], 'NODE_A16_BUILDING_BERTH');
     });
 
+    test('update writes the same columns without project_id', () {
+      final row = HullModel.update(draft(delivery: DateTime(2028, 1, 15)));
+      expect(row.containsKey('project_id'), isFalse);
+      expect(row.containsKey('metadata'), isFalse);
+      expect(row['hull_no'], 'NB-1004');
+      expect(row['forecast_delivery_date'], '2028-01-15');
+    });
+
+    test('contract types round-trip from the database value', () {
+      for (final t in HullContractType.values) {
+        expect(HullContractType.fromDb(t.dbValue), t);
+      }
+      expect(HullContractType.fromDb(null), HullContractType.newbuild);
+    });
+
     test('drops build milestones for repairs', () {
       final row = HullModel.insert(
         draft(type: HullContractType.repair, cutting: DateTime(2027, 1, 1), keel: DateTime(2027, 2, 1)),

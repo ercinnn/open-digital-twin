@@ -1,12 +1,15 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/theme/app_theme.dart';
+import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../digital_twin/domain/entities/twin_entities.dart';
 import '../../../../digital_twin/presentation/providers/twin_providers.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/services/yard_kpis.dart';
 import '../../providers/shipyard_providers.dart';
+import '../production/hull_dialog.dart';
 import '../scene_actions.dart';
 
 /// Management dashboard: all hulls, yard KPIs and what needs attention now.
@@ -22,27 +25,36 @@ class DashboardTab extends ConsumerWidget {
     final components = ref.watch(componentsProvider(projectId)).value ?? const <TwinComponent>[];
     final byId = componentsById(components);
     final today = ref.watch(todayProvider);
+    final canEdit = ref.watch(isEditorProvider);
+
+    Future<void> openHull(Hull hull) async {
+      if (hull.locationNodeId != null) actions.selectNode(hull.locationNodeId!);
+      final saved = await HullDialog.show(
+        context,
+        projectId: projectId,
+        hull: hull,
+        readOnly: !canEdit,
+        existingHulls: [for (final h in kpis.hulls) h.hull],
+        locations: components.where((c) => hullLocationCategories.contains(c.category)).toList(),
+      );
+      if (saved == null) return;
+      ref.invalidate(hullsProvider(projectId));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hull ${saved.displayName} saved.')));
+      }
+    }
 
     String pct(double? v) => v == null ? '—' : '${v.toStringAsFixed(0)} %';
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth > 900;
-        final hullCards = SizedBox(
-          height: 150,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: kpis.hulls.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 10),
-            itemBuilder: (context, i) => _HullCard(
-              health: kpis.hulls[i],
-              today: today,
-              onTap: () {
-                final node = kpis.hulls[i].hull.locationNodeId;
-                if (node != null) actions.selectNode(node);
-              },
-            ),
+        final hullCards = _HullStrip(
+          itemCount: kpis.hulls.length,
+          itemBuilder: (context, i) => _HullCard(
+            health: kpis.hulls[i],
+            today: today,
+            onTap: () => openHull(kpis.hulls[i].hull),
           ),
         );
         final tiles = Wrap(
@@ -119,6 +131,69 @@ class DashboardTab extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Horizontal strip of hull cards. On the web / desktop a mouse can scroll it
+/// with the wheel (vertical wheel moves sideways), by dragging, or with the
+/// always-visible scrollbar.
+class _HullStrip extends StatefulWidget {
+  const _HullStrip({required this.itemCount, required this.itemBuilder});
+
+  final int itemCount;
+  final IndexedWidgetBuilder itemBuilder;
+
+  @override
+  State<_HullStrip> createState() => _HullStripState();
+}
+
+class _HullStripState extends State<_HullStrip> {
+  final _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || !_controller.hasClients) return;
+    final position = _controller.position;
+    if (position.maxScrollExtent <= 0) return; // everything fits: let the page scroll
+    // Claim the wheel event so the dashboard does not scroll vertically at the same time.
+    GestureBinding.instance.pointerSignalResolver.register(event, (e) {
+      final delta = (e as PointerScrollEvent).scrollDelta;
+      final amount = delta.dx.abs() > delta.dy.abs() ? delta.dx : delta.dy;
+      _controller.jumpTo((_controller.offset + amount).clamp(0.0, position.maxScrollExtent));
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 164,
+      child: Listener(
+        onPointerSignal: _onPointerSignal,
+        child: ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(
+            scrollbars: false, // the explicit Scrollbar below is used instead
+            dragDevices: {...PointerDeviceKind.values},
+          ),
+          child: Scrollbar(
+            controller: _controller,
+            thumbVisibility: true,
+            child: ListView.separated(
+              controller: _controller,
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+              itemCount: widget.itemCount,
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: widget.itemBuilder,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

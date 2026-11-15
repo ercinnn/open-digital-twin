@@ -23,6 +23,9 @@ abstract interface class ShipyardRepository {
   /// Creates a hull (editors). Throws [ShipyardException] e.g. for a duplicate hull number.
   Future<Hull> createHull(HullDraft draft);
 
+  /// Updates the particulars, milestones, status and location of a hull (editors).
+  Future<Hull> updateHull(String hullId, HullDraft draft);
+
   /// Realtime schedule rows of a project.
   Stream<List<ProductionActivity>> watchActivities(String projectId);
 

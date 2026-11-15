@@ -52,6 +52,9 @@ class HullModel {
       'location_node_id': text(d.locationNodeId),
     };
   }
+
+  /// Columns an editor may change on an existing hull (`metadata` is kept).
+  static Map<String, dynamic> update(HullDraft d) => insert(d)..remove('project_id');
 }
 
 class ProductionActivityModel {

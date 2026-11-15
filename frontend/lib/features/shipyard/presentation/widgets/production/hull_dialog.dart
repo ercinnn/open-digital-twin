@@ -7,13 +7,23 @@ import '../../../domain/entities/production_entities.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
 import '../../providers/shipyard_providers.dart';
 
-/// New hull (editors): particulars, milestones, status and current berth / dock.
-/// Returns the created [Hull] when saved.
-class NewHullDialog extends ConsumerStatefulWidget {
-  const NewHullDialog({super.key, required this.projectId, required this.existingHulls, required this.locations});
+/// Hull particulars, milestones, status and current berth / dock.
+/// [hull] == null creates a new hull; otherwise the hull is edited (editors)
+/// or shown read-only ([readOnly]). Returns the saved [Hull].
+class HullDialog extends ConsumerStatefulWidget {
+  const HullDialog({
+    super.key,
+    required this.projectId,
+    required this.existingHulls,
+    required this.locations,
+    this.hull,
+    this.readOnly = false,
+  });
 
   final String projectId;
   final List<Hull> existingHulls;
+  final Hull? hull;
+  final bool readOnly;
 
   /// Berths, docks and quays (components in [hullLocationCategories]).
   final List<TwinComponent> locations;
@@ -23,40 +33,59 @@ class NewHullDialog extends ConsumerStatefulWidget {
     required String projectId,
     required List<Hull> existingHulls,
     required List<TwinComponent> locations,
+    Hull? hull,
+    bool readOnly = false,
   }) {
     return showDialog<Hull>(
       context: context,
-      barrierDismissible: false,
-      builder: (_) => NewHullDialog(projectId: projectId, existingHulls: existingHulls, locations: locations),
+      barrierDismissible: readOnly,
+      builder: (_) => HullDialog(
+        projectId: projectId,
+        existingHulls: existingHulls,
+        locations: locations,
+        hull: hull,
+        readOnly: readOnly,
+      ),
     );
   }
 
   @override
-  ConsumerState<NewHullDialog> createState() => _NewHullDialogState();
+  ConsumerState<HullDialog> createState() => _HullDialogState();
 }
 
-class _NewHullDialogState extends ConsumerState<NewHullDialog> {
-  final _hullNo = TextEditingController();
-  final _name = TextEditingController();
-  final _shipType = TextEditingController();
-  final _owner = TextEditingController();
-  final _classSociety = TextEditingController();
-  final _length = TextEditingController();
-  final _beam = TextEditingController();
-  final _deadweight = TextEditingController();
+class _HullDialogState extends ConsumerState<HullDialog> {
+  late final Hull? _initial = widget.hull;
+  late final _hullNo = TextEditingController(text: _initial?.hullNo ?? '');
+  late final _name = TextEditingController(text: _initial?.name ?? '');
+  late final _shipType = TextEditingController(text: _initial?.shipType ?? '');
+  late final _owner = TextEditingController(text: _initial?.ownerName ?? '');
+  late final _classSociety = TextEditingController(text: _initial?.classSociety ?? '');
+  late final _length = TextEditingController(text: _numberText(_initial?.lengthM));
+  late final _beam = TextEditingController(text: _numberText(_initial?.beamM));
+  late final _deadweight = TextEditingController(text: _numberText(_initial?.deadweightT));
 
-  HullContractType _contractType = HullContractType.newbuild;
-  HullStatus _status = HullStatus.planned;
-  String? _locationNodeId;
-  late DateTime? _contractDate = ref.read(todayProvider);
-  DateTime? _steelCutting;
-  DateTime? _keelLaying;
-  DateTime? _launching;
-  DateTime? _contractDelivery;
-  DateTime? _forecastDelivery;
+  late HullContractType _contractType = HullContractType.fromDb(_initial?.contractType);
+  late HullStatus _status = _initial?.status ?? HullStatus.planned;
+  late String? _locationNodeId = _initial?.locationNodeId;
+  late DateTime? _contractDate = _initial == null ? ref.read(todayProvider) : _initial.contractDate;
+  late DateTime? _steelCutting = _initial?.steelCuttingDate;
+  late DateTime? _keelLaying = _initial?.keelLayingDate;
+  late DateTime? _launching = _initial?.launchingDate;
+  late DateTime? _contractDelivery = _initial?.contractDeliveryDate;
+  late DateTime? _forecastDelivery = _initial?.forecastDeliveryDate;
 
   bool _saving = false;
   List<String> _errors = const [];
+
+  bool get _isEdit => _initial != null;
+
+  /// Fields are locked while saving and in read-only mode.
+  bool get _enabled => !_saving && !widget.readOnly;
+
+  static String _numberText(double? v) {
+    if (v == null) return '';
+    return v == v.roundToDouble() ? v.toStringAsFixed(0) : '$v';
+  }
 
   @override
   void dispose() {
@@ -106,7 +135,10 @@ class _NewHullDialogState extends ConsumerState<NewHullDialog> {
     final errors = [
       for (final (label, c) in [('Length', _length), ('Beam', _beam), ('Deadweight', _deadweight)])
         if (_invalidNumber(c)) '$label is not a number.',
-      ...draft.validationErrors(existingHullNos: widget.existingHulls.map((h) => h.hullNo)),
+      ...draft.validationErrors(
+        // The edited hull may keep its own number.
+        existingHullNos: widget.existingHulls.where((h) => h.id != _initial?.id).map((h) => h.hullNo),
+      ),
     ];
     if (errors.isNotEmpty) {
       setState(() => _errors = errors);
@@ -117,7 +149,8 @@ class _NewHullDialogState extends ConsumerState<NewHullDialog> {
       _errors = const [];
     });
     try {
-      final hull = await ref.read(shipyardRepositoryProvider).createHull(draft);
+      final repository = ref.read(shipyardRepositoryProvider);
+      final hull = _isEdit ? await repository.updateHull(_initial!.id, draft) : await repository.createHull(draft);
       if (mounted) Navigator.of(context).pop(hull);
     } on ShipyardException catch (e) {
       if (mounted) {
@@ -144,7 +177,7 @@ class _NewHullDialogState extends ConsumerState<NewHullDialog> {
 
   Widget _text(TextEditingController c, String label, {String? hint, bool number = false}) => TextField(
     controller: c,
-    enabled: !_saving,
+    enabled: _enabled,
     keyboardType: number ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
     decoration: InputDecoration(labelText: label, hintText: hint),
   );
@@ -153,7 +186,7 @@ class _NewHullDialogState extends ConsumerState<NewHullDialog> {
     label: label,
     value: value,
     helper: helper,
-    enabled: !_saving,
+    enabled: _enabled,
     initial: value ?? _contractDelivery ?? _contractDate ?? ref.read(todayProvider),
     onChanged: (d) => setState(() => onChanged(d)),
   );
@@ -175,7 +208,13 @@ class _NewHullDialogState extends ConsumerState<NewHullDialog> {
     final build = _contractType != HullContractType.repair;
     final locations = [...widget.locations]..sort((a, b) => a.name.compareTo(b.name));
     return AlertDialog(
-      title: const Text('New hull'),
+      title: Text(
+        !_isEdit
+            ? 'New hull'
+            : widget.readOnly
+            ? _initial!.displayName
+            : 'Edit ${_initial!.hullNo}',
+      ),
       content: SizedBox(
         width: 560,
         child: SingleChildScrollView(
@@ -193,7 +232,7 @@ class _NewHullDialogState extends ConsumerState<NewHullDialog> {
                   initialValue: _contractType,
                   decoration: const InputDecoration(labelText: 'Contract type'),
                   items: [for (final t in HullContractType.values) DropdownMenuItem(value: t, child: Text(t.label))],
-                  onChanged: _saving ? null : (v) => _onContractType(v ?? _contractType),
+                  onChanged: !_enabled ? null : (v) => _onContractType(v ?? _contractType),
                 ),
                 _text(_shipType, 'Ship type', hint: 'e.g. Bulk carrier 28,000 dwt'),
               ),
@@ -241,10 +280,9 @@ class _NewHullDialogState extends ConsumerState<NewHullDialog> {
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Status'),
                   items: [
-                    for (final s in HullStatus.values)
-                      if (build ? s != HullStatus.docked : true) DropdownMenuItem(value: s, child: Text(s.label)),
+                    for (final s in HullStatus.values) DropdownMenuItem(value: s, child: Text(s.label)),
                   ],
-                  onChanged: _saving ? null : (v) => setState(() => _status = v ?? _status),
+                  onChanged: !_enabled ? null : (v) => setState(() => _status = v ?? _status),
                 ),
                 DropdownButtonFormField<String?>(
                   initialValue: _locationNodeId,
@@ -252,13 +290,16 @@ class _NewHullDialogState extends ConsumerState<NewHullDialog> {
                   decoration: const InputDecoration(labelText: 'Current location'),
                   items: [
                     const DropdownMenuItem<String?>(value: null, child: Text('— (not in the yard yet)')),
+                    // Keep a stored location that is not a berth / dock / quay mesh selectable.
+                    if (_locationNodeId != null && !locations.any((c) => c.meshNodeId == _locationNodeId))
+                      DropdownMenuItem<String?>(value: _locationNodeId, child: Text(_locationNodeId!)),
                     for (final c in locations)
                       DropdownMenuItem<String?>(
                         value: c.meshNodeId,
                         child: Text(c.name, overflow: TextOverflow.ellipsis),
                       ),
                   ],
-                  onChanged: _saving ? null : (v) => setState(() => _locationNodeId = v),
+                  onChanged: !_enabled ? null : (v) => setState(() => _locationNodeId = v),
                 ),
               ),
               if (_errors.isNotEmpty)
@@ -279,13 +320,17 @@ class _NewHullDialogState extends ConsumerState<NewHullDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: _saving ? null : () => Navigator.of(context).pop(), child: const Text('Cancel')),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: _saving
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('Create hull'),
-        ),
+        if (widget.readOnly)
+          FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))
+        else ...[
+          TextButton(onPressed: _saving ? null : () => Navigator.of(context).pop(), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : Text(_isEdit ? 'Save changes' : 'Create hull'),
+          ),
+        ],
       ],
     );
   }

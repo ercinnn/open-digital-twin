@@ -110,7 +110,7 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
   }
 
   Future<void> _newHull(List<Hull> hulls, List<TwinComponent> components) async {
-    final hull = await NewHullDialog.show(
+    final hull = await HullDialog.show(
       context,
       projectId: widget.projectId,
       existingHulls: hulls,
