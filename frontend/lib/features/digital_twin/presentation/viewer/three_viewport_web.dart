@@ -48,6 +48,17 @@ class _WebThreeViewportState extends State<_WebThreeViewport> {
     widget.controller.attach(_sender);
   }
 
+  /// On the web the iframe sits in the DOM and swallows pointer events even
+  /// where Flutter paints on top of it (dialogs, dropdown lists, popup menus).
+  /// While any route covers the twin page, the iframe is made click-through so
+  /// the overlay receives the clicks and keyboard focus.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final interactive = ModalRoute.isCurrentOf(context) ?? true;
+    _iframe.style.pointerEvents = interactive ? 'auto' : 'none';
+  }
+
   @override
   void dispose() {
     web.window.removeEventListener('message', _onMessage);
