@@ -5,7 +5,9 @@ Open-source, license-free **Digital Twin Platform** for Marine Engineering (ship
 
 ## 2. Tech Stack & Strict Boundaries
 - **Frontend:** Flutter (Web & Desktop primary, Mobile compatible) + `flutter_riverpod` (3.x) + `supabase_flutter`.
-- **3D Engine:** Embedded `Three.js` r170 (`frontend/assets/viewer/`) communicating with Flutter via bidirectional JS channels `FlutterToThree` / `ThreeToFlutter`.
+- **3D Engine:** Embedded `Three.js` r170 (`frontend/assets/viewer/`, loaded from jsDelivr `three@0.170.0`) communicating with Flutter via bidirectional JS channels `FlutterToThree` / `ThreeToFlutter`. Message shape `{"channel", "type", "payload"}`; the full command/event contract is the header comment of `twin_scene.js` - keep it in sync when adding commands.
+  - Commands: `load_model`, `set_statuses`, `select_node`, `focus_node`, `focus_nodes`, `reset_camera`, `set_color_mode` (`status`|`material`|`overlay`), plus the shipyard commands in §8a.
+  - Events: `viewer_ready`, `model_progress`, `model_loaded{mesh_node_ids,url}`, `model_error`, `node_selected`, `marker_selected`, `viewer_error`.
 - **Backend:** Python 3.11+ `FastAPI` + `trimesh` (+`cascadio` for STEP) / `ifcopenshell` + Headless **Blender** 4.2 LTS (`blender --background --python ...`).
 - **Database & Realtime:** Supabase (PostgreSQL, Storage, Auth, Realtime). Project ref `unksjqvehethysjubclj` (Frankfurt).
 
@@ -19,7 +21,8 @@ Open-source, license-free **Digital Twin Platform** for Marine Engineering (ship
 - **Flutter Architecture:** Feature-First Clean Architecture (`data`, `domain`, `presentation`). Provide complete, step-by-step file implementations without placeholders or TODOs.
 - **Secrets:** `SUPABASE_SERVICE_ROLE_KEY` lives ONLY in the root `.env` (backend). `frontend/.env` is bundled into the app as an asset and must contain public values only.
 - **Access model (migration 003):** `anon` + `authenticated` can only SELECT. Writes require an editor: an authenticated user listed in `public.app_editors` (checked by RPC `is_editor()`). Signing up alone grants nothing. The UI hides/disables write controls unless `isEditorProvider` is true. Add an editor with: `insert into public.app_editors (user_id) select id from auth.users where email = '<email>';`
-- **Backend auth:** every FastAPI endpoint except `/health` requires `Authorization: Bearer <Supabase access token>` of an editor (`app/auth.py`: token validated by Supabase Auth + row in `app_editors`). The Flutter `BackendApiClient` sends the current session token. `AUTH_REQUIRED=false` disables this for isolated local experiments only. CORS: `CORS_ORIGINS` (exact) + `CORS_ORIGIN_REGEX`; no cookies/credentials.
+- **Backend auth:** every FastAPI endpoint except `/health` requires `Authorization: Bearer <Supabase access token>` of an editor (`app/auth.py`: token validated by Supabase Auth + row in `app_editors`). The Flutter `BackendApiClient` sends the current session token. `AUTH_REQUIRED=false` disables this for isolated local experiments only. CORS: `CORS_ORIGINS` (exact, default `*`) + `CORS_ORIGIN_REGEX`; no cookies/credentials.
+- **Backend env (root `.env`, template `.env.example`):** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_PASSWORD` (scripts/CLI), `BLENDER_PATH`, `CORS_ORIGINS`, `CORS_ORIGIN_REGEX`, `AUTH_REQUIRED` (default `true`), `MAX_FACES_PER_NODE` (default 60000, decimation target), `BLENDER_TIMEOUT_S` (default 900). Frontend template: `frontend/.env.example` (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `BACKEND_URL`).
 - **Status values:** `normal` (green), `in_progress` (blue), `warning` (orange), `alert` (pulsing red). Sensor simulation never overwrites `in_progress`.
 
 ## 4. Core Pipeline
@@ -31,7 +34,7 @@ Open-source, license-free **Digital Twin Platform** for Marine Engineering (ship
 
 ## 5. Repository Layout
 ```
-CLAUDE.md, ROADMAP.md, .gitignore, .gitattributes (LF line endings, binary GLB/PNG/PDF)
+CLAUDE.md, ROADMAP.md (Turkish), .env.example, .gitignore, .gitattributes (LF line endings, binary GLB/PNG/PDF)
 .github/workflows/deploy-web.yml   # Flutter web build -> GitHub Pages
 .github/workflows/supabase-keepalive.yml  # twice-weekly REST ping so the free project is not paused
 supabase/
@@ -71,8 +74,11 @@ backend/
   scripts/reset_demo_data.py       # re-applies supabase/seed.sql over the pooler (+ --publish)
   scripts/sample_documents.py      # PDF/PNG generators (marked DEMO)
   sample_models/                   # nb42_engine_room.glb, villa_b04.glb, demo_shipyard.glb
-  tests/test_backend.py
+                                   #   + manifest.json (node ids per GLB, written by generate_sample_models.py)
+  tests/test_backend.py            # 17 tests: parser/node ids, editor auth, ingest jobs, PROFILES == metric_profiles,
+                                   #   seed node ids exist, shipyard tables secured, sample GLB mapping contract
 frontend/
+  .env.example                     # public values only (bundled as an asset)
   assets/viewer/index.html, twin_scene.js   # Three.js scene + bridge
   lib/core/                        # config, theme, backend client, providers, status enum
   lib/shared/widgets/              # status badges, loading/error/empty, section card
@@ -82,6 +88,7 @@ frontend/
   lib/features/shipyard/           # yard operations dock (shown when a project has hulls):
                                    #   Dashboard, Production (Gantt + 3D timeline), Organization, Cranes & docks,
                                    #   Materials, Quality, HSE; scene overlays/pins/labels/layers, camera presets
+  test/                            # widget_test, production_schedule_test, shipyard_domain_test (pure Dart domain logic)
 ```
 
 ## 6. Run Commands
@@ -120,7 +127,7 @@ supabase db push --include-seed -p <SUPABASE_DB_PASSWORD>
 ```
 
 ## 7. Public Website (GitHub Pages)
-- URL: https://ercinnn.github.io/open-digital-twin/ — built by `.github/workflows/deploy-web.yml` on every push to `main` touching `frontend/**`.
+- URL: https://ercinnn.github.io/open-digital-twin/ — built by `.github/workflows/deploy-web.yml` on every push to `main` touching `frontend/**` (Flutter stable pinned to `3.47.9` in the workflow; bump it together with local upgrades).
 - CI injects config with `--dart-define` from repository secrets `SUPABASE_URL`, `SUPABASE_ANON_KEY` (optional repo variable `BACKEND_URL`, default `http://localhost:8000`). `AppConfig` prefers dart-defines and falls back to `frontend/.env`.
 - Built with `--base-href /open-digital-twin/`. Locally in Git Bash prefix with `MSYS_NO_PATHCONV=1` or the path gets mangled.
 - Ingest calls the FastAPI backend, which currently runs ONLY locally (`BACKEND_URL` default `http://localhost:8000`): on the public site it works for a signed-in editor whose own machine runs the backend. The code is cloud-ready (`backend/Dockerfile`, editor auth, background jobs, the app waits on `/health` while a sleeping instance wakes); hosting options are in `ROADMAP.md`. Hugging Face Docker Spaces need a PRO subscription (free cpu-basic returns 402) - `scripts/deploy_hf_space.py` only works with PRO. "Simulate Live Sensor" uses the Supabase RPC; telemetry also updates every minute without any user.
@@ -148,7 +155,7 @@ Real sensors replace the simulator; the app needs no changes as long as readings
 - GitHub CLI: `C:\Program Files\GitHub CLI\gh.exe` (token scopes `repo`, `workflow`, `read:org`, `gist`). Pushing changes under `.github/workflows/` requires the `workflow` scope.
 
 ## 10. Roadmap
-Planned but not yet implemented work (24/7 simulator in Supabase via pg_cron, database-side thresholds, device ingest endpoint, cloud CAD ingest, real-file tests) is tracked in `ROADMAP.md`. Check it before starting related work and remove items once done.
+Planned but not yet implemented work is tracked in `ROADMAP.md` (written in Turkish): hosting the cloud CAD ingest (code is ready, a host must be chosen), persistent ingest jobs, database-side thresholds for real sensors (insert trigger on `telemetry_logs`), per-device ingest endpoint + gateway, real `.step`/`.ocx` file tests, desktop/mobile viewer tests, GitHub Actions upgrades off Node 20, and the next shipyard steps (department-scoped editors, pg_cron booking status progression, in-area block slots, remaining NB-1001/NB-1002 block geometry, camera QR/RFID scanning). Already done and documented here: the 24/7 pg_cron simulator (migration 004), editor-only backend auth + background jobs, the shipyard module (005-011). Check `ROADMAP.md` before starting related work; when an item is done, remove it there and document it in this file.
 
 ## 11. Environment Notes (Windows dev machine)
 - Blender 4.2 LTS: `C:\Program Files\Blender Foundation\Blender 4.2\blender.exe` (`BLENDER_PATH` in `.env`). Without Blender, ingest falls back to an unoptimized trimesh GLB and reports a warning.
