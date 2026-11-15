@@ -88,6 +88,82 @@ class MaterialItem {
   }
 }
 
+/// Mirrors the `material_items.unit` check constraint.
+const stockUnits = ['t', 'kg', 'pcs', 'm', 'l', 'set'];
+
+/// Usual stock unit of a category (steel by weight, pipes by length, ...).
+String defaultUnitFor(StockCategory type) => switch (type) {
+  StockCategory.plate || StockCategory.profile => 't',
+  StockCategory.pipe => 'm',
+  StockCategory.equipment => 'set',
+  StockCategory.outfitting => 'pcs',
+  StockCategory.consumable => 'kg',
+  StockCategory.paint => 'l',
+};
+
+/// Usual storage area of a category (mesh ids of the demo shipyard).
+String defaultStoreFor(StockCategory type) => switch (type) {
+  StockCategory.plate || StockCategory.profile => 'NODE_A01_STEEL_STOCKYARD',
+  _ => 'NODE_A02_GENERAL_WAREHOUSE',
+};
+
+/// A stock item entered or edited by an editor (`material_items`).
+class MaterialDraft {
+  const MaterialDraft({
+    required this.projectId,
+    required this.itemCode,
+    required this.description,
+    required this.type,
+    required this.unit,
+    this.onHand = 0,
+    this.reserved = 0,
+    this.reorderLevel = 0,
+    this.grade,
+    this.dimensions,
+    this.locationComponentId,
+    this.hullId,
+    this.heatNumber,
+    this.certificateNo,
+    this.supplier,
+  });
+
+  final String projectId;
+  final String itemCode;
+  final String description;
+  final StockCategory type;
+  final String unit;
+  final double onHand;
+  final double reserved;
+  final double reorderLevel;
+  final String? grade;
+  final String? dimensions;
+  final String? locationComponentId;
+
+  /// Hull the stock is purchased / reserved for (null = general stock).
+  final String? hullId;
+  final String? heatNumber;
+  final String? certificateNo;
+  final String? supplier;
+
+  /// Item codes are stored trimmed and upper case (e.g. `PL-AH36-12-N4`).
+  String get normalizedCode => itemCode.trim().toUpperCase();
+
+  /// Human-readable problems; empty when the draft can be saved.
+  List<String> validationErrors({Iterable<String> existingCodes = const []}) {
+    final code = normalizedCode;
+    return [
+      if (code.isEmpty) 'Enter an item code.',
+      if (code.length > 40) 'The item code may have at most 40 characters.',
+      if (code.isNotEmpty && existingCodes.any((c) => c.trim().toUpperCase() == code))
+        'Item code $code already exists.',
+      if (description.trim().isEmpty) 'Enter a description.',
+      if (!stockUnits.contains(unit)) 'Choose a unit.',
+      for (final (label, v) in [('On hand', onHand), ('Reserved', reserved), ('Reorder level', reorderLevel)])
+        if (v < 0) '$label may not be negative.',
+    ];
+  }
+}
+
 /// Table `material_trace_events`.
 class TraceEvent {
   const TraceEvent({

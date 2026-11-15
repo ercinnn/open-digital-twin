@@ -239,6 +239,25 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
     }
   }
 
+  @override
+  Future<void> createMaterialItem(MaterialDraft draft) =>
+      _saveMaterial(draft, () => supabase.from('material_items').insert(MaterialItemModel.insert(draft)));
+
+  @override
+  Future<void> updateMaterialItem(String itemId, MaterialDraft draft) =>
+      _saveMaterial(draft, () => supabase.from('material_items').update(MaterialItemModel.update(draft)).eq('id', itemId));
+
+  Future<void> _saveMaterial(MaterialDraft draft, Future<void> Function() write) async {
+    try {
+      await write();
+    } on PostgrestException catch (e) {
+      if (e.code == '23505') throw ShipyardException('Item code ${draft.normalizedCode} already exists.');
+      _rethrow(e);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
   // ---- Quality ------------------------------------------------------------------
   @override
   Future<List<QualityInspection>> fetchInspections(String projectId) async {
@@ -248,6 +267,56 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
         .eq('project_id', projectId)
         .order('inspected_at', ascending: false);
     return rows.map(QualityInspectionModel.fromJson).toList();
+  }
+
+  @override
+  Future<void> createInspections(List<InspectionDraft> drafts) async {
+    if (drafts.isEmpty) return;
+    try {
+      await supabase.from('quality_inspections').insert([for (final d in drafts) QualityInspectionModel.insert(d)]);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
+  Future<QualityInspection> recordInspectionResult(
+    String inspectionId, {
+    required InspectionResult result,
+    required DateTime inspectedAt,
+    double? measuredValue,
+    String? notes,
+  }) async {
+    try {
+      final row = await supabase
+          .from('quality_inspections')
+          .update(
+            QualityInspectionModel.resultUpdate(
+              result: result,
+              inspectedAt: inspectedAt,
+              measuredValue: measuredValue,
+              notes: notes,
+            ),
+          )
+          .eq('id', inspectionId)
+          .select()
+          .single();
+      return QualityInspectionModel.fromJson(row);
+    } on PostgrestException catch (e) {
+      if (e.code == 'PGRST116') throw const ShipyardException('Not saved: sign in with an editor account and reload.');
+      _rethrow(e);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
+  Future<void> deleteInspection(String inspectionId) async {
+    try {
+      await supabase.from('quality_inspections').delete().eq('id', inspectionId);
+    } catch (e) {
+      _rethrow(e);
+    }
   }
 
   @override

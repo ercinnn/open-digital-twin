@@ -10,7 +10,12 @@ import '../../../domain/entities/material_entities.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
 import '../../providers/shipyard_providers.dart';
+import '../production/activity_form_dialog.dart' show yardAreas;
 import '../scene_actions.dart';
+import 'material_dialog.dart';
+
+/// Hull filter value for items without a hull.
+const _generalStock = '__general__';
 
 /// Stock levels per item and the traceability history of tagged pieces.
 class MaterialsTab extends ConsumerStatefulWidget {
@@ -25,6 +30,9 @@ class MaterialsTab extends ConsumerStatefulWidget {
 
 class _MaterialsTabState extends ConsumerState<MaterialsTab> {
   StockCategory? _type;
+
+  /// null = all items, [_generalStock] = items without a hull, else a hull id.
+  String? _hullFilter;
   bool _alertsOnly = false;
   String _query = '';
   String? _tag;
@@ -103,10 +111,56 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
     reserved.dispose();
   }
 
+  Future<void> _openItem({
+    required List<MaterialItem> items,
+    required List<Hull> hulls,
+    required List<TwinComponent> components,
+    MaterialItem? item,
+  }) async {
+    final saved = await MaterialItemDialog.show(
+      context,
+      projectId: widget.projectId,
+      existing: items,
+      hulls: hulls,
+      stores: yardAreas(components),
+      item: item,
+      initialHullId: _hullFilter == _generalStock ? null : _hullFilter,
+    );
+    if (saved != true || !mounted) return;
+    ref.invalidate(materialsProvider(widget.projectId));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(item == null ? 'Stock item created.' : '${item.itemCode} saved.')),
+    );
+  }
+
+  Widget _hullMenu(List<Hull> hulls) {
+    final label = switch (_hullFilter) {
+      null => 'All hulls',
+      _generalStock => 'General stock',
+      final id => hulls.where((h) => h.id == id).firstOrNull?.hullNo ?? 'Hull',
+    };
+    return PopupMenuButton<String>(
+      tooltip: 'Filter by hull',
+      onSelected: (v) => setState(() => _hullFilter = v.isEmpty ? null : v),
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: '', child: Text('All hulls')),
+        const PopupMenuItem(value: _generalStock, child: Text('General stock (no hull)')),
+        for (final h in hulls) PopupMenuItem(value: h.id, child: Text(h.displayName)),
+      ],
+      child: Chip(
+        avatar: const Icon(Icons.directions_boat_outlined, size: 16),
+        label: Row(mainAxisSize: MainAxisSize.min, children: [Text(label), const Icon(Icons.arrow_drop_down, size: 18)]),
+        side: BorderSide(color: _hullFilter == null ? AppTheme.outline : AppTheme.accent),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final items = ref.watch(materialsProvider(widget.projectId));
     final components = ref.watch(componentsProvider(widget.projectId)).value ?? const <TwinComponent>[];
+    final hulls = ref.watch(hullsProvider(widget.projectId)).value ?? const <Hull>[];
+    final hullNos = {for (final h in hulls) h.id: h.hullNo};
     final byId = componentsById(components);
     final canEdit = ref.watch(isEditorProvider);
 
@@ -123,6 +177,8 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
               final q = _query.toLowerCase();
               final filtered = list.where((i) {
                 if (_type != null && i.type != _type) return false;
+                if (_hullFilter == _generalStock && i.hullId != null) return false;
+                if (_hullFilter != null && _hullFilter != _generalStock && i.hullId != _hullFilter) return false;
                 if (_alertsOnly && i.state == StockState.ok) return false;
                 return q.isEmpty || i.itemCode.toLowerCase().contains(q) || i.description.toLowerCase().contains(q);
               }).toList();
@@ -147,6 +203,8 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
                             scrollDirection: Axis.horizontal,
                             child: Row(
                               children: [
+                                _hullMenu(hulls),
+                                const SizedBox(width: 6),
                                 FilterChip(
                                   selected: _alertsOnly,
                                   avatar: const Icon(Icons.warning_amber_rounded, size: 16, color: Color(0xFFF59E0B)),
@@ -166,6 +224,16 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
                             ),
                           ),
                         ),
+                        if (canEdit)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 6),
+                            child: FilledButton.tonalIcon(
+                              style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+                              onPressed: () => _openItem(items: list, hulls: hulls, components: components),
+                              icon: const Icon(Icons.add, size: 18),
+                              label: const Text('New item'),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -184,10 +252,14 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
                         };
                         return ListTile(
                           dense: true,
+                          onTap: canEdit
+                              ? () => _openItem(items: list, hulls: hulls, components: components, item: item)
+                              : null,
                           leading: Icon(item.type.icon, color: color, size: 20),
                           title: Text('${item.itemCode} · ${item.description}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5)),
                           subtitle: Text(
                             [
+                              if (item.hullId != null) 'for ${hullNos[item.hullId] ?? 'hull'}',
                               if (item.grade != null) item.grade!,
                               if (item.dimensions != null) item.dimensions!,
                               if (item.heatNumber != null) 'heat ${item.heatNumber}',

@@ -98,15 +98,173 @@ class _PunchItemDialogState extends ConsumerState<PunchItemDialog> {
   }
 }
 
-class InspectionDialog extends StatelessWidget {
+/// Inspection details; editors record the result (measured value -> automatic
+/// pass / fail from the acceptance band) or delete a planned inspection.
+class InspectionDialog extends ConsumerStatefulWidget {
   const InspectionDialog({super.key, required this.inspection, required this.component});
 
   final QualityInspection inspection;
   final TwinComponent? component;
 
   @override
+  ConsumerState<InspectionDialog> createState() => _InspectionDialogState();
+}
+
+/// Result choice when recording; [auto] lets the acceptance band decide.
+enum _ResultChoice { auto, pass, fail, conditional }
+
+class _InspectionDialogState extends ConsumerState<InspectionDialog> {
+  late QualityInspection _q = widget.inspection;
+  bool _recording = false;
+  bool _saving = false;
+  String? _error;
+  late final _measured = TextEditingController(text: _q.measuredValue?.toString() ?? '');
+  late final _notes = TextEditingController(text: _q.notes ?? '');
+  late _ResultChoice _choice = _hasBand ? _ResultChoice.auto : _ResultChoice.pass;
+
+  bool get _hasBand => _q.acceptanceMin != null || _q.acceptanceMax != null;
+
+  String get _projectId => widget.component?.projectId ?? '';
+
+  @override
+  void dispose() {
+    _measured.dispose();
+    _notes.dispose();
+    super.dispose();
+  }
+
+  Future<void> _record() async {
+    final text = _measured.text.trim();
+    final measured = text.isEmpty ? null : double.tryParse(text.replaceAll(',', '.'));
+    if (text.isNotEmpty && measured == null) {
+      setState(() => _error = 'The measured value is not a number.');
+      return;
+    }
+    if (_choice == _ResultChoice.auto && measured == null) {
+      setState(() => _error = 'Enter the measured value, or choose the result yourself.');
+      return;
+    }
+    final result = switch (_choice) {
+      _ResultChoice.auto => InspectionResult.pending, // the trigger turns it into pass / fail
+      _ResultChoice.pass => InspectionResult.pass,
+      _ResultChoice.fail => InspectionResult.fail,
+      _ResultChoice.conditional => InspectionResult.conditional,
+    };
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final saved = await ref.read(shipyardRepositoryProvider).recordInspectionResult(
+        _q.id,
+        result: result,
+        inspectedAt: DateTime.now(),
+        measuredValue: measured,
+        notes: _notes.text,
+      );
+      ref.invalidate(inspectionsProvider(_projectId));
+      if (!mounted) return;
+      setState(() {
+        _q = saved;
+        _saving = false;
+        _recording = false;
+      });
+    } on ShipyardException catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = e.message;
+        });
+      }
+    }
+  }
+
+  Future<void> _delete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete inspection?'),
+        content: Text('${_q.referenceNo} · ${_q.description ?? _q.type.label}\n\nThis cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB91C1C)),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await ref.read(shipyardRepositoryProvider).deleteInspection(_q.id);
+      ref.invalidate(inspectionsProvider(_projectId));
+      if (mounted) Navigator.of(context).pop();
+    } on ShipyardException catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = e.message;
+        });
+      }
+    }
+  }
+
+  List<Widget> _recordForm() => [
+    const Divider(height: 24),
+    Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _measured,
+            enabled: !_saving,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+            decoration: InputDecoration(
+              labelText: 'Measured value${_q.unit == null ? '' : ' (${_q.unit})'}',
+              helperText: _hasBand ? 'Acceptance ${_q.acceptanceText}' : 'Optional',
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: DropdownButtonFormField<_ResultChoice>(
+            initialValue: _choice,
+            decoration: const InputDecoration(labelText: 'Result'),
+            items: [
+              if (_hasBand) const DropdownMenuItem(value: _ResultChoice.auto, child: Text('Auto (from band)')),
+              const DropdownMenuItem(value: _ResultChoice.pass, child: Text('Pass')),
+              const DropdownMenuItem(value: _ResultChoice.fail, child: Text('Fail')),
+              const DropdownMenuItem(value: _ResultChoice.conditional, child: Text('Conditional')),
+            ],
+            onChanged: _saving ? null : (v) => setState(() => _choice = v ?? _choice),
+          ),
+        ),
+      ],
+    ),
+    const SizedBox(height: 10),
+    TextField(
+      controller: _notes,
+      enabled: !_saving,
+      maxLines: 2,
+      decoration: const InputDecoration(labelText: 'Notes'),
+    ),
+    if (_hasBand)
+      const Padding(
+        padding: EdgeInsets.only(top: 6),
+        child: Text(
+          'A value outside the acceptance band is always stored as "Fail" (database rule).',
+          style: TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+        ),
+      ),
+  ];
+
+  @override
   Widget build(BuildContext context) {
-    final q = inspection;
+    final q = _q;
+    final canEdit = ref.watch(isEditorProvider);
+    final planned = q.result == InspectionResult.pending && q.inspectedAt.isAfter(DateTime.now());
     return AlertDialog(
       title: Row(
         children: [
@@ -122,23 +280,52 @@ class InspectionDialog extends StatelessWidget {
       ),
       content: SizedBox(
         width: 460,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (q.description != null) Text(q.description!, style: const TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            _kv('Location', component?.name ?? '—'),
-            _kv('Inspected', formatDateTime(q.inspectedAt)),
-            if (q.measuredValue != null) _kv('Measured', '${q.measuredValue} ${q.unit ?? ''}'),
-            if (q.acceptanceText != null) _kv('Acceptance', q.acceptanceText!),
-            if (q.inspector != null) _kv('Inspector', q.inspector!),
-            if (q.witnessedBy != null) _kv('Witnessed by', q.witnessedBy!),
-            if (q.notes != null) _kv('Notes', q.notes!),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (q.description != null) Text(q.description!, style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              _kv('Location', widget.component?.name ?? '—'),
+              _kv(planned ? 'Planned' : 'Inspected', formatDateTime(q.inspectedAt)),
+              if (q.measuredValue != null) _kv('Measured', '${q.measuredValue} ${q.unit ?? ''}'),
+              if (q.acceptanceText != null) _kv('Acceptance', q.acceptanceText!),
+              if (q.inspector != null) _kv('Inspector', q.inspector!),
+              if (q.witnessedBy != null) _kv('Witnessed by', q.witnessedBy!),
+              if (q.notes != null && !_recording) _kv('Notes', q.notes!),
+              if (_recording) ..._recordForm(),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(_error!, style: const TextStyle(color: Color(0xFFFCA5A5))),
+                ),
+            ],
+          ),
         ),
       ),
-      actions: [FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
+      actions: [
+        if (canEdit && !_recording) ...[
+          TextButton(
+            onPressed: _saving ? null : _delete,
+            child: const Text('Delete', style: TextStyle(color: Color(0xFFFCA5A5))),
+          ),
+          OutlinedButton(
+            onPressed: _saving ? null : () => setState(() => _recording = true),
+            child: const Text('Record result'),
+          ),
+        ],
+        if (_recording) ...[
+          TextButton(onPressed: _saving ? null : () => setState(() => _recording = false), child: const Text('Back')),
+          FilledButton(
+            onPressed: _saving ? null : _record,
+            child: _saving
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Save result'),
+          ),
+        ] else
+          FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+      ],
     );
   }
 }

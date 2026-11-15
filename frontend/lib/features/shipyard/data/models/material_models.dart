@@ -21,6 +21,30 @@ class MaterialItemModel {
     certificateNo: json['certificate_no'] as String?,
     supplier: json['supplier'] as String?,
   );
+
+  /// Row for `insert into material_items`.
+  static Map<String, dynamic> insert(MaterialDraft d) => {'project_id': d.projectId, ...update(d)};
+
+  /// Columns an editor may change on an existing item.
+  static Map<String, dynamic> update(MaterialDraft d) {
+    String? text(String? v) => v == null || v.trim().isEmpty ? null : v.trim();
+    return {
+      'item_code': d.normalizedCode,
+      'description': d.description.trim(),
+      'material_type': d.type.dbValue,
+      'grade': text(d.grade),
+      'dimensions': text(d.dimensions),
+      'unit': d.unit,
+      'quantity_on_hand': d.onHand,
+      'quantity_reserved': d.reserved,
+      'reorder_level': d.reorderLevel,
+      'location_component_id': d.locationComponentId,
+      'hull_id': d.hullId,
+      'heat_number': text(d.heatNumber),
+      'certificate_no': text(d.certificateNo),
+      'supplier': text(d.supplier),
+    };
+  }
 }
 
 class TraceEventModel {

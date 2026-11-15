@@ -73,8 +73,29 @@ abstract interface class ShipyardRepository {
 
   Future<void> setStock(String itemId, {required double onHand, required double reserved});
 
+  /// Creates a stock item (editors). Throws [ShipyardException] e.g. for a duplicate item code.
+  Future<void> createMaterialItem(MaterialDraft draft);
+
+  /// Updates all fields of a stock item (editors).
+  Future<void> updateMaterialItem(String itemId, MaterialDraft draft);
+
   // ---- Quality (009) ----------------------------------------------------------
   Future<List<QualityInspection>> fetchInspections(String projectId);
+
+  /// Plans inspections (result `pending`) in one request.
+  Future<void> createInspections(List<InspectionDraft> drafts);
+
+  /// Records a result. With a measured value inside / outside the acceptance band and
+  /// [result] `pending`, the database sets pass / fail. Returns the stored row.
+  Future<QualityInspection> recordInspectionResult(
+    String inspectionId, {
+    required InspectionResult result,
+    required DateTime inspectedAt,
+    double? measuredValue,
+    String? notes,
+  });
+
+  Future<void> deleteInspection(String inspectionId);
 
   /// Realtime punch list.
   Stream<List<PunchItem>> watchPunchItems(String projectId);

@@ -11,6 +11,7 @@ import '../../../domain/entities/quality_entities.dart';
 import '../../providers/scene_view_providers.dart';
 import '../../providers/shipyard_providers.dart';
 import '../scene_actions.dart';
+import 'inspection_plan_dialogs.dart';
 import 'quality_dialogs.dart';
 
 /// Punch list + inspection log, both pinned in 3D.
@@ -28,6 +29,64 @@ class _QualityTabState extends ConsumerState<QualityTab> {
   bool _openOnly = true;
   String? _hullId;
 
+  void _snack(String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+
+  Future<void> _planInspection(List<Hull> hulls, List<TwinComponent> components, TwinComponent? selected) async {
+    final saved = await NewInspectionDialog.show(
+      context,
+      projectId: widget.projectId,
+      hulls: hulls,
+      components: components,
+      existing: ref.read(inspectionsProvider(widget.projectId)).value ?? const [],
+      initialHullId: _hullId,
+      initialComponentId: selected?.id,
+    );
+    if (saved != true || !mounted) return;
+    ref.invalidate(inspectionsProvider(widget.projectId));
+    _snack('Inspection planned.');
+  }
+
+  Future<void> _draftPlan(List<Hull> hulls, List<TwinComponent> components) async {
+    final hullId = await DraftInspectionPlanDialog.show(
+      context,
+      hulls: hulls,
+      activities: ref.read(activitiesProvider(widget.projectId)).value ?? const [],
+      components: components,
+      existing: ref.read(inspectionsProvider(widget.projectId)).value ?? const [],
+      initialHullId: _hullId,
+    );
+    if (hullId == null || !mounted) return;
+    ref.invalidate(inspectionsProvider(widget.projectId));
+    setState(() => _hullId = hullId);
+    _snack('Inspection plan created. Tap an inspection to record its result.');
+  }
+
+  Widget _planMenu(List<Hull> hulls, List<TwinComponent> components, TwinComponent? selected) => PopupMenuButton<String>(
+    tooltip: 'Plan inspections',
+    onSelected: (v) => v == 'one' ? _planInspection(hulls, components, selected) : _draftPlan(hulls, components),
+    itemBuilder: (_) => const [
+      PopupMenuItem(
+        value: 'one',
+        child: ListTile(dense: true, leading: Icon(Icons.playlist_add_check), title: Text('Plan inspection…')),
+      ),
+      PopupMenuItem(
+        value: 'draft',
+        child: ListTile(
+          dense: true,
+          leading: Icon(Icons.auto_awesome_motion_outlined),
+          title: Text('Draft inspection plan from schedule…'),
+        ),
+      ),
+    ],
+    child: const Padding(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [Icon(Icons.fact_check_outlined, size: 18), SizedBox(width: 4), Text('Plan'), Icon(Icons.arrow_drop_down, size: 18)],
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final projectId = widget.projectId;
@@ -40,6 +99,8 @@ class _QualityTabState extends ConsumerState<QualityTab> {
     final selected = ref.watch(selectedComponentProvider(projectId));
     final canEdit = ref.watch(isEditorProvider);
     final today = ref.watch(todayProvider);
+    // Keeps the schedule stream alive for the inspection plan draft.
+    ref.watch(activitiesProvider(projectId));
 
     final items = (punch.value ?? const <PunchItem>[])
         .where((p) => (!_openOnly || p.isOpen) && (_hullId == null || p.hullId == _hullId))
@@ -59,6 +120,11 @@ class _QualityTabState extends ConsumerState<QualityTab> {
           padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
           child: Row(
             children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
               for (final p in PunchPriority.values)
                 Padding(
                   padding: const EdgeInsets.only(right: 6),
@@ -86,13 +152,17 @@ class _QualityTabState extends ConsumerState<QualityTab> {
               ),
               const SizedBox(width: 8),
               FilterChip(label: const Text('Open only'), selected: _openOnly, onSelected: (v) => setState(() => _openOnly = v)),
-              const Spacer(),
+                    ],
+                  ),
+                ),
+              ),
               const Text('Pins in 3D', style: TextStyle(fontSize: 12)),
               Switch(
                 value: view.qualityPins,
                 onChanged: ref.read(sceneViewProvider(projectId).notifier).setQualityPins,
               ),
               const SizedBox(width: 6),
+              if (canEdit) ...[_planMenu(hulls, components, selected), const SizedBox(width: 6)],
               Tooltip(
                 message: selected == null ? 'Select a block or area first' : 'Raise a punch item on ${selected.name}',
                 child: FilledButton.icon(
@@ -179,7 +249,12 @@ class _QualityTabState extends ConsumerState<QualityTab> {
                         trailing: Text(q.result.label, style: TextStyle(fontSize: 11.5, color: q.result.color, fontWeight: FontWeight.w700)),
                         onTap: () {
                           if (c != null) widget.actions.selectNode(c.meshNodeId);
-                          showDialog<void>(context: context, builder: (_) => InspectionDialog(inspection: q, component: c));
+                          showDialog<void>(
+                            context: context,
+                            builder: (_) => InspectionDialog(inspection: q, component: c),
+                          ).then((_) {
+                            if (mounted) ref.invalidate(inspectionsProvider(projectId));
+                          });
                         },
                       );
                     },

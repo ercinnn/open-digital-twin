@@ -28,6 +28,44 @@ class QualityInspectionModel {
     position: readMarker(json),
     notes: json['notes'] as String?,
   );
+
+  /// Row for `insert into quality_inspections` (a planned, pending inspection).
+  static Map<String, dynamic> insert(InspectionDraft d) {
+    String? text(String? v) => v == null || v.trim().isEmpty ? null : v.trim();
+    return {
+      'project_id': d.projectId,
+      'component_id': d.componentId,
+      'hull_id': d.hullId,
+      'inspection_type': d.type.dbValue,
+      'reference_no': d.referenceNo.trim().toUpperCase(),
+      'description': text(d.description),
+      'result': InspectionResult.pending.dbValue,
+      'unit': text(d.unit),
+      'acceptance_min': d.acceptanceMin,
+      'acceptance_max': d.acceptanceMax,
+      'inspector': text(d.inspector),
+      'witnessed_by': text(d.witnessedBy),
+      'inspected_at': writeTimestamp(d.plannedAt),
+      'notes': text(d.notes),
+      'marker_u': 0.5,
+      'marker_v': 0.5,
+      'marker_w': 1,
+    };
+  }
+
+  /// Columns written when a result is recorded. With a measured value and an
+  /// acceptance band, [result] `pending` lets the database trigger decide pass / fail.
+  static Map<String, dynamic> resultUpdate({
+    required InspectionResult result,
+    required DateTime inspectedAt,
+    double? measuredValue,
+    String? notes,
+  }) => {
+    'result': result.dbValue,
+    'measured_value': measuredValue,
+    'inspected_at': writeTimestamp(inspectedAt),
+    'notes': notes == null || notes.trim().isEmpty ? null : notes.trim(),
+  };
 }
 
 class PunchItemModel {

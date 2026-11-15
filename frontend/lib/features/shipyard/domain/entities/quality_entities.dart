@@ -95,6 +95,94 @@ class QualityInspection {
   static String _n(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
 }
 
+/// Typical unit, acceptance band and inspector role of an inspection type
+/// (values in line with the demo seed). A measured value outside the band is
+/// set to `fail` by the database trigger `_evaluate_inspection`.
+class InspectionPreset {
+  const InspectionPreset({required this.inspector, this.unit, this.min, this.max});
+
+  final String inspector;
+  final String? unit;
+  final double? min;
+  final double? max;
+
+  bool get hasBand => min != null || max != null;
+}
+
+const inspectionPresets = <InspectionType, InspectionPreset>{
+  InspectionType.ndtUt: InspectionPreset(inspector: 'Yard NDT Level II'),
+  InspectionType.ndtRt: InspectionPreset(inspector: 'External NDT company'),
+  InspectionType.ndtMt: InspectionPreset(inspector: 'Yard NDT Level II'),
+  InspectionType.ndtPt: InspectionPreset(inspector: 'Yard NDT Level II'),
+  InspectionType.visualWeld: InspectionPreset(inspector: 'Yard QC inspector'),
+  InspectionType.coatingDft: InspectionPreset(inspector: 'Yard coating inspector', unit: 'um', min: 250, max: 450),
+  InspectionType.dimensional: InspectionPreset(inspector: 'Yard dimensional control', unit: 'mm', max: 3),
+  InspectionType.pressureTest: InspectionPreset(inspector: 'Yard QC inspector', unit: 'bar', min: 15, max: 16),
+  InspectionType.classSurvey: InspectionPreset(inspector: 'Class surveyor (demo)'),
+};
+
+/// A planned inspection entered by an editor (insert into `quality_inspections`,
+/// result `pending`).
+class InspectionDraft {
+  const InspectionDraft({
+    required this.projectId,
+    required this.componentId,
+    required this.type,
+    required this.referenceNo,
+    required this.plannedAt,
+    this.hullId,
+    this.description,
+    this.unit,
+    this.acceptanceMin,
+    this.acceptanceMax,
+    this.inspector,
+    this.witnessedBy,
+    this.notes,
+  });
+
+  final String projectId;
+
+  /// Block or yard area the inspection is pinned to (required by the table).
+  final String? componentId;
+  final String? hullId;
+  final InspectionType type;
+  final String referenceNo;
+  final String? description;
+  final String? unit;
+  final double? acceptanceMin;
+  final double? acceptanceMax;
+  final String? inspector;
+  final String? witnessedBy;
+
+  /// Stored in `inspected_at`; replaced by the real time when the result is recorded.
+  final DateTime plannedAt;
+  final String? notes;
+
+  /// Human-readable problems; empty when the draft can be saved.
+  List<String> validationErrors() => [
+    if (componentId == null) 'Choose the block or area to inspect.',
+    if (referenceNo.trim().isEmpty) 'Enter a reference number.',
+    if (acceptanceMin != null && acceptanceMax != null && acceptanceMin! > acceptanceMax!)
+      'The acceptance minimum is above the maximum.',
+  ];
+}
+
+/// Next free inspection reference of a hull in the seed style `QI-<hull digits>-<4 digits>`
+/// (`NB-1004` -> `QI-1004-0001`, then `QI-1004-0002`, ...).
+String nextInspectionReference(String hullNo, Iterable<String> existingReferences, {int offset = 0}) {
+  final digits = hullNo.replaceAll(RegExp(r'\D'), '');
+  final key = digits.isEmpty ? hullNo.toUpperCase().replaceAll(RegExp('[^A-Z0-9]'), '') : digits;
+  final prefix = 'QI-$key-';
+  var max = 0;
+  for (final r in existingReferences) {
+    final ref = r.trim().toUpperCase();
+    if (!ref.startsWith(prefix)) continue;
+    final n = int.tryParse(ref.substring(prefix.length));
+    if (n != null && n > max) max = n;
+  }
+  return '$prefix${(max + 1 + offset).toString().padLeft(4, '0')}';
+}
+
 enum PunchPriority {
   a('A', Color(0xFFEF4444), 'Before next milestone'),
   b('B', Color(0xFFF59E0B), 'Before delivery'),
