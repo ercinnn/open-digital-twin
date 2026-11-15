@@ -7,6 +7,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/async_states.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../shipyard/presentation/widgets/yard_context_card.dart';
 import '../../domain/entities/twin_entities.dart';
 import '../providers/twin_providers.dart';
 import 'documents_section.dart';
@@ -36,6 +37,7 @@ class InspectorPanel extends ConsumerWidget {
         _StatusSwitcher(component: component),
         const SizedBox(height: 12),
         _PropertiesCard(component: component),
+        YardContextCard(projectId: projectId, component: component),
         const SizedBox(height: 12),
         TelemetryPanel(componentId: component.id),
         const SizedBox(height: 12),

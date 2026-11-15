@@ -37,4 +37,10 @@ Bir madde tamamlandığında buradan silinip ilgili açıklama `CLAUDE.md`'ye ta
       yazıldı ama çalıştırılarak denenmedi.
 - [ ] **GitHub Actions güncellemesi:** Node.js 20 kullanan action'lar (`checkout@v4`, `configure-pages@v5`,
       `upload-pages-artifact@v3`, `deploy-pages@v4`) yeni sürümlere yükseltilmeli.
-- [ ] **Demo verisini sıfırlama:** durumları ve telemetriyi `seed.sql`'deki başlangıç hâline döndüren bir betik/komut.
+- [ ] **Tersane modülü – sonraki adımlar** (temel modül migration 005-011 ile tamamlandı):
+  - [ ] Departman bazlı yazma yetkisi (ör. boya birimi yalnızca kendi alanını düzenler): `app_editors` + `department_id`, RLS politikalarında kullanım.
+  - [ ] Rezervasyon durumlarının zamanla otomatik ilerlemesi (planned → in_progress → done) için pg_cron işi; şu an uygulama "etkin durumu" saate göre gösteriyor.
+  - [ ] Blok yerleşimi için alan içi gerçek slot/koordinat bilgisi (şu an alanın uzun ekseni boyunca otomatik sıralanıyor).
+  - [ ] NB-1001'in modellenmemiş ambar blokları (y 108-170 arası) ve NB-1002 blok geometrileri.
+  - [ ] QR/RFID için kamera ile barkod okuma (mobil); şu an klavye-wedge okuyucu veya elle giriş.
+  - [ ] Masaüstü/mobil görüntüleyicide tersane katmanlarının (pin, etiket) denenmesi.

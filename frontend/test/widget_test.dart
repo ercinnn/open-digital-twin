@@ -53,6 +53,25 @@ void main() {
       controller.dispose();
     });
 
+    test('a rebuilt viewport keeps its connection when the old one detaches late', () {
+      // Flutter mounts the new view before disposing the old one.
+      final controller = ThreeViewerController();
+      final oldSent = <String>[];
+      final newSent = <String>[];
+      void oldSender(String json) => oldSent.add(json);
+      void newSender(String json) => newSent.add(json);
+      controller.attach(oldSender);
+      controller.loadModel('https://example.com/model.glb');
+      controller.attach(newSender);
+      controller.detach(oldSender);
+      controller.handleRawMessage(jsonEncode({'channel': 'ThreeToFlutter', 'type': 'viewer_ready', 'payload': {}}));
+      expect(oldSent, isEmpty);
+      expect(newSent.map((m) => jsonDecode(m)['type']), contains('load_model'));
+      controller.detach(newSender);
+      expect(controller.isReady, isFalse);
+      controller.dispose();
+    });
+
     test('ignores foreign messages', () {
       final controller = ThreeViewerController();
       controller.handleRawMessage('not json');

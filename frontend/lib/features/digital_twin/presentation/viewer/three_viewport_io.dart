@@ -44,12 +44,14 @@ class _MobileThreeViewportState extends State<_MobileThreeViewport> {
         onMessageReceived: (message) => widget.controller.handleRawMessage(message.message),
       )
       ..loadFlutterAsset('assets/viewer/index.html');
-    widget.controller.attach((json) => _web.runJavaScript(_jsCall(json)));
+    widget.controller.attach(_sender);
   }
+
+  void _sender(String json) => _web.runJavaScript(_jsCall(json));
 
   @override
   void dispose() {
-    widget.controller.detach();
+    widget.controller.detach(_sender);
     super.dispose();
   }
 
@@ -95,7 +97,7 @@ class _WindowsThreeViewportState extends State<_WindowsThreeViewport> {
       _messages = _web.webMessage.listen((dynamic message) {
         widget.controller.handleRawMessage(message is String ? message : jsonEncode(message));
       });
-      widget.controller.attach((json) => _web.executeScript(_jsCall(json)));
+      widget.controller.attach(_sender);
       await _web.loadUrl('https://$_virtualHost/index.html');
       if (mounted) setState(() => _initialized = true);
     } catch (e) {
@@ -103,9 +105,11 @@ class _WindowsThreeViewportState extends State<_WindowsThreeViewport> {
     }
   }
 
+  void _sender(String json) => _web.executeScript(_jsCall(json));
+
   @override
   void dispose() {
-    widget.controller.detach();
+    widget.controller.detach(_sender);
     _messages?.cancel();
     _web.dispose();
     super.dispose();

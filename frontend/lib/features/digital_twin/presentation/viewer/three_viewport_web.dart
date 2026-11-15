@@ -23,6 +23,7 @@ class _WebThreeViewportState extends State<_WebThreeViewport> {
   late final String _viewType = 'odt-three-viewer-${_nextId++}';
   late final web.HTMLIFrameElement _iframe;
   late final JSFunction _onMessage;
+  void _sender(String json) => _iframe.contentWindow?.postMessage(json.toJS, '*'.toJS);
 
   @override
   void initState() {
@@ -44,15 +45,13 @@ class _WebThreeViewportState extends State<_WebThreeViewport> {
     }).toJS;
     web.window.addEventListener('message', _onMessage);
 
-    widget.controller.attach((json) {
-      _iframe.contentWindow?.postMessage(json.toJS, '*'.toJS);
-    });
+    widget.controller.attach(_sender);
   }
 
   @override
   void dispose() {
     web.window.removeEventListener('message', _onMessage);
-    widget.controller.detach();
+    widget.controller.detach(_sender);
     super.dispose();
   }
 

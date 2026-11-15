@@ -1,0 +1,213 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../../core/theme/app_theme.dart';
+import '../../../../../shared/widgets/async_states.dart';
+import '../../../../digital_twin/domain/entities/twin_entities.dart';
+import '../../../../digital_twin/presentation/providers/twin_providers.dart';
+import '../../../domain/entities/production_entities.dart';
+import '../../../domain/services/production_schedule.dart';
+import '../../providers/shipyard_providers.dart';
+import '../scene_actions.dart';
+import 'activity_dialog.dart';
+import 'gantt_chart.dart';
+import 'timeline_bar.dart';
+
+/// Production schedule: Gantt per hull / block + 3D timeline scrubber.
+class ProductionTab extends ConsumerStatefulWidget {
+  const ProductionTab({super.key, required this.projectId, required this.actions});
+
+  final String projectId;
+  final SceneActions actions;
+
+  @override
+  ConsumerState<ProductionTab> createState() => _ProductionTabState();
+}
+
+class _ProductionTabState extends ConsumerState<ProductionTab> {
+  final _gantt = GlobalKey<GanttChartState>();
+  String? _hullFilter;
+  String? _selectedActivityId;
+
+  List<GanttRow> _rows(
+    List<Hull> hulls,
+    ProductionSchedule schedule,
+    Map<String, TwinComponent> byId,
+    Map<String, TwinComponent> byNode,
+    DateTime today,
+    DateTime sceneDate,
+  ) {
+    final rows = <GanttRow>[];
+    for (final hull in hulls) {
+      if (_hullFilter != null && hull.id != _hullFilter) continue;
+      final items = schedule.activities.where((a) => a.hullId == hull.id).toList();
+      if (items.isEmpty) continue;
+      final progress = ProductionSchedule.progressOf(items, today);
+      rows.add(GanttRow.header(label: hull.displayName, trailing: '${progress.earnedPct.round()} %'));
+
+      final byComponent = <String, List<ProductionActivity>>{};
+      final hullLevel = <ProductionActivity>[];
+      for (final a in items) {
+        if (a.componentId == null) {
+          hullLevel.add(a);
+        } else {
+          byComponent.putIfAbsent(a.componentId!, () => []).add(a);
+        }
+      }
+      int sequence(String componentId) {
+        final v = byId[componentId]?.metadata['erection_sequence'];
+        return v is num ? v.toInt() : 999;
+      }
+
+      final componentIds = byComponent.keys.toList()..sort((a, b) => sequence(a).compareTo(sequence(b)));
+      for (final id in componentIds) {
+        final placement = ProductionSchedule.placementFor(schedule.forComponent(id, today), sceneDate, today);
+        rows.add(
+          GanttRow(
+            label: shortComponentName(byId[id]),
+            sublabel: _placementText(placement, byNode),
+            activities: byComponent[id]!,
+          ),
+        );
+      }
+      if (hullLevel.isNotEmpty) {
+        rows.add(
+          GanttRow(
+            label: hull.isRepair ? 'Docking & repair' : 'Hull milestones',
+            sublabel: componentIds.isEmpty ? (hull.shipType ?? '') : 'Launching, outfitting, trials',
+            activities: hullLevel,
+          ),
+        );
+      }
+    }
+    return rows;
+  }
+
+  String _placementText(BlockPlacement p, Map<String, TwinComponent> byNode) => switch (p.kind) {
+    PlacementKind.hidden => 'Not started',
+    PlacementKind.erected => p.activity?.stage == ProductionStage.erection && p.activity?.isDone != true
+        ? 'Erection on berth'
+        : 'Erected',
+    PlacementKind.area => '${p.ghost ? 'Parts at ' : 'At '}${shortComponentName(byNode[p.areaNodeId], fallback: p.areaNodeId)}',
+  };
+
+  void _onTap(ProductionActivity a, Map<String, TwinComponent> byId, Map<String, TwinComponent> byNode) {
+    setState(() => _selectedActivityId = a.id);
+    final block = a.componentId == null ? null : byId[a.componentId];
+    if (block != null) {
+      widget.actions.selectNode(block.meshNodeId);
+    } else if (a.locationNodeId != null && byNode.containsKey(a.locationNodeId)) {
+      widget.actions.selectNode(a.locationNodeId!);
+    }
+    ActivityDialog.show(
+      context,
+      activity: a,
+      blockName: block?.name,
+      locationName: a.locationNodeId == null ? null : byNode[a.locationNodeId]?.name,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final projectId = widget.projectId;
+    final hulls = ref.watch(hullsProvider(projectId));
+    final activities = ref.watch(activitiesProvider(projectId));
+    final components = ref.watch(componentsProvider(projectId)).value ?? const <TwinComponent>[];
+    final schedule = ref.watch(scheduleProvider(projectId));
+    final today = ref.watch(todayProvider);
+    final sceneDate = ref.watch(sceneDateProvider(projectId));
+    final selectedComponent = ref.watch(selectedComponentProvider(projectId));
+
+    if (hulls.hasError) return ErrorView(error: hulls.error!);
+    if (activities.hasError) return ErrorView(error: activities.error!);
+    if (!hulls.hasValue || !activities.hasValue) return const LoadingView();
+    final range = schedule.range(today);
+    if (range == null) {
+      return const EmptyView(icon: Icons.view_timeline_outlined, message: 'No production schedule for this project.');
+    }
+
+    final byId = componentsById(components);
+    final byNode = componentsByNode(components);
+    final hullList = hulls.value!;
+    final rows = _rows(hullList, schedule, byId, byNode, today, sceneDate);
+    final running = schedule.runningAt(sceneDate, today).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 6, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text('All hulls'),
+                        selected: _hullFilter == null,
+                        onSelected: (_) => setState(() => _hullFilter = null),
+                      ),
+                      for (final h in hullList)
+                        if (schedule.activities.any((a) => a.hullId == h.id))
+                          Padding(
+                            padding: const EdgeInsets.only(left: 6),
+                            child: ChoiceChip(
+                              label: Text(h.hullNo),
+                              selected: _hullFilter == h.id,
+                              onSelected: (_) => setState(() => _hullFilter = h.id),
+                            ),
+                          ),
+                    ],
+                  ),
+                ),
+              ),
+              Tooltip(
+                message: [for (final s in ProductionStage.values) '■ ${s.label}'].join('\n'),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text('$running running · legend', style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted)),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Zoom out',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _gantt.currentState?.zoom(1 / 1.4),
+                icon: const Icon(Icons.zoom_out, size: 18),
+              ),
+              IconButton(
+                tooltip: 'Zoom in',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _gantt.currentState?.zoom(1.4),
+                icon: const Icon(Icons.zoom_in, size: 18),
+              ),
+              IconButton(
+                tooltip: 'Scroll to the timeline date',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _gantt.currentState?.scrollToDate(sceneDate),
+                icon: const Icon(Icons.center_focus_strong, size: 18),
+              ),
+            ],
+          ),
+        ),
+        TimelineBar(projectId: projectId),
+        const Divider(height: 1),
+        Expanded(
+          child: GanttChart(
+            key: _gantt,
+            rows: rows,
+            rangeStart: range.$1,
+            rangeEnd: range.$2,
+            today: today,
+            cursor: sceneDate,
+            selectedActivityId: _selectedActivityId,
+            highlightComponentId: selectedComponent?.id,
+            onScrub: (d) => ref.read(timelineProvider(projectId).notifier).setDate(d),
+            onTapActivity: (a) => _onTap(a, byId, byNode),
+          ),
+        ),
+      ],
+    );
+  }
+}

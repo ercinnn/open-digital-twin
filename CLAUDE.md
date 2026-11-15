@@ -14,6 +14,7 @@ Open-source, license-free **Digital Twin Platform** for Marine Engineering (ship
 - **3D Mapping Rule:** Every 3D mesh node exported to `.glb` MUST preserve its exact `mesh_node_id` matching the `mesh_node_id` column in Supabase `components`.
   - Node ids are `NODE_<UPPER_SNAKE>` (≤ 60 chars, see `cad_parser.sanitize_node_id`), stored both as the glTF node name and in `extras.mesh_node_id`.
   - Context-only geometry (not in the BOM) is prefixed `CTX_`; the viewer ghosts it and makes it non-pickable (optional glTF extras `ctx_opacity` 0..1 overrides the default 0.16; >= 0.99 renders opaque).
+  - Shipyard hull blocks (`NODE_NB1001_BLOCK_*`) are modelled at their ERECTED position; the viewer moves them to the yard area of their running/last schedule row (`set_placements`), ghosts them while in parts (cutting/bending/panel) and hides them before the first activity.
   - The ingest pipeline fails with HTTP 500 if any BOM id is missing from the exported GLB.
 - **Flutter Architecture:** Feature-First Clean Architecture (`data`, `domain`, `presentation`). Provide complete, step-by-step file implementations without placeholders or TODOs.
 - **Secrets:** `SUPABASE_SERVICE_ROLE_KEY` lives ONLY in the root `.env` (backend). `frontend/.env` is bundled into the app as an asset and must contain public values only.
@@ -39,10 +40,18 @@ supabase/
   migrations/002_rls_policies.sql    # RLS, buckets, storage policies (demo write policies replaced by 003)
   migrations/003_editor_write_policies.sql  # read-only public access, editor-only writes (app_editors)
   migrations/004_db_telemetry_simulator.sql # metric_profiles, simulate_telemetry RPC, pg_cron (1/min, 4-day retention)
-  seed.sql                         # 3 demo projects (tug engine room, villa, shipyard), 36 components, 36 documents, 2160 telemetry rows
+  migrations/005_shipyard_production.sql    # _odt_secure_table() helper, hulls, production_activities (Gantt rows)
+  migrations/006_shipyard_organization.sql  # departments (tree), shifts, area_assignments (headcount, no personal data)
+  migrations/007_shipyard_resources.sql     # resource_bookings: no-overlap exclusion constraint, capacity check, crane-alarm suspend/resume
+  migrations/008_shipyard_materials.sql     # material_items (stock), material_trace_events (QR/RFID tag history)
+  migrations/009_shipyard_quality.sql       # quality_inspections (auto pass/fail from acceptance band), punch_items
+  migrations/010_shipyard_hse.sql           # work_permits (gas test enforced for hot work / confined space), hse_zones, hse_incidents
+  migrations/011_shipyard_dashboard.sql     # latest_telemetry(project_id) RPC
+  seed.sql                         # 3 demo projects (tug, villa, shipyard), 42 components, 36 documents, 2496 telemetry rows
+                                   # + shipyard operations (6 hulls, 73 activities, org, bookings, stock, QA, HSE), dates relative to current_date
 backend/
   Dockerfile, .dockerignore        # python:3.11-slim + Blender 4.2 LTS (Linux), port $PORT (default 7860); not deployed yet
-  requirements-deploy.txt          # huggingface_hub (deploy tooling, not in the image)
+  requirements-deploy.txt          # huggingface_hub + psycopg (tooling, not in the image)
   app/main.py                      # FastAPI app, CORS, GET /health[?deep=true]
   app/auth.py                      # require_editor dependency (Supabase token + app_editors)
   app/config.py                    # .env loading, Blender discovery, CORS/auth settings
@@ -59,6 +68,7 @@ backend/
   app/blender_scripts/generate_sample_models.py  # builds the 3 demo GLBs
   scripts/deploy_hf_space.py       # creates/updates a Hugging Face Docker Space (needs HF PRO)
   scripts/publish_sample_assets.py # uploads demo GLBs + generated demo documents
+  scripts/reset_demo_data.py       # re-applies supabase/seed.sql over the pooler (+ --publish)
   scripts/sample_documents.py      # PDF/PNG generators (marked DEMO)
   sample_models/                   # nb42_engine_room.glb, villa_b04.glb, demo_shipyard.glb
   tests/test_backend.py
@@ -69,6 +79,9 @@ frontend/
   lib/features/auth/               # editor sign-in, read-only gating
   lib/features/projects/           # dashboard, create project, upload + ingest
   lib/features/digital_twin/       # split view, component tree, inspector, telemetry, docs, viewer bridge
+  lib/features/shipyard/           # yard operations dock (shown when a project has hulls):
+                                   #   Dashboard, Production (Gantt + 3D timeline), Organization, Cranes & docks,
+                                   #   Materials, Quality, HSE; scene overlays/pins/labels/layers, camera presets
 ```
 
 ## 6. Run Commands
@@ -100,8 +113,10 @@ flutter run -d windows         # Desktop (WebView2 via webview_windows)
 supabase link --project-ref unksjqvehethysjubclj -p <SUPABASE_DB_PASSWORD from .env>
 supabase db push --include-seed -p <SUPABASE_DB_PASSWORD>
 # NOTE: the CLI runs a seed file only once. After editing seed.sql it merely records the new hash
-# ("Updating seed hash") without executing it - re-apply seed.sql via the SQL editor or psql
-# (pooler URL in supabase/.temp/pooler-url, sslmode=require). It resets ALL demo projects.
+# ("Updating seed hash") without executing it. Re-apply it with (resets ALL demo projects, then
+# re-links documents + GLBs):
+#   backend\.venv\Scripts\python -m pip install -r requirements-deploy.txt   # once (psycopg)
+#   backend\.venv\Scripts\python -m scripts.reset_demo_data --publish        # from backend/
 ```
 
 ## 7. Public Website (GitHub Pages)
@@ -117,6 +132,14 @@ Real sensors replace the simulator; the app needs no changes as long as readings
 - **Thresholds:** reuse the metric names in `telemetry_simulator.PROFILES` (e.g. `vibration_velocity`, `power_consumption`) so thresholds stay consistent. IMPORTANT: threshold evaluation and automatic `components.status` changes currently live ONLY in the simulators (Python + `public._simulate_project_telemetry`) — rows inserted directly by real sensors update charts but do NOT recolor meshes until an insert trigger evaluates `public.metric_profiles` (see `ROADMAP.md`).
 - **Security:** never deploy `SUPABASE_SERVICE_ROLE_KEY` to field devices. RLS only allows editors to insert. Planned approach: per-device API keys validated by a Supabase Edge Function that may only insert telemetry (revocable per device).
 - **Volume:** aggregate at the gateway (e.g. 1-minute averages or send-on-change); per-second raw data exhausts the free plan (500 MB DB). The built-in simulator alone writes ~130k rows/day (90 metrics x 1/min, ~100-190 MB at 4-day retention); adding projects/metrics or real sensors needs the retention window re-checked.
+
+## 8a. Shipyard Operations Module (migrations 005-011)
+- Shown for projects with rows in `hulls` (demo project 3). All tables use `_odt_secure_table()`: public SELECT, editor-only writes (same model as 003); realtime on `production_activities`, `resource_bookings`, `punch_items`, `work_permits`.
+- Business rules live in the DATABASE: booking overlap per (resource, slot) = exclusion constraint (`btree_gist`, error 23P01); load > `metadata.swl_t`/`lifting_capacity_t` rejected; crane turning `alert` suspends its running/imminent bookings and resumes them when the alarm clears (works for real sensors too); hot work / confined space permits need O2 19.5-23.5 % and LEL < 10 % to become `active`; inspections with a measured value are set pass/fail from the acceptance band.
+- Block placement / Gantt / KPI logic is pure Dart (`features/shipyard/domain/services/`), unit tested. Viewer commands added: `set_placements`, `set_overlay` (+ color mode `overlay`), `set_markers` (pins, event `marker_selected`, ids `punch:|qi:|permit:|incident:<uuid>`), `set_highlights` (blink), `set_labels`, `set_hidden`, `focus_nodes`.
+- `ThreeViewerController.detach(sender)` ignores stale senders: a rebuilt viewport is mounted before the old one is disposed.
+- Every `NODE_*` referenced by the operations seed must exist in the demo components (backend test). Same-day bookings in the seed are relative to the current hour.
+- `postgrest` `.order()` defaults to DESCENDING - always pass `ascending:` explicitly.
 
 ## 9. Git & GitHub
 - Repository: https://github.com/ercinnn/open-digital-twin (public). Default branch `main`.

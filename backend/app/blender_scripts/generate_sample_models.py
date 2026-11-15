@@ -11,7 +11,8 @@ Outputs:
     villa_b04.glb         -> NODE_RC_COLUMN_S01, NODE_HEAT_PUMP_UNIT,
                              NODE_CONCEALED_PIPE_KITCHEN (+ CTX_* context meshes)
     demo_shipyard.glb     -> NODE_A01..NODE_A20 yard areas, NODE_CRN_* cranes,
-                             NODE_NB1001_BLOCK_* newbuild blocks (+ CTX_* sea, ships,
+                             NODE_NB1001_BLOCK_* newbuild blocks modelled at their erected
+                             positions (+ CTX_* sea, ships,
                              production-flow arrows)
 
 CTX_* objects may carry a `ctx_opacity` custom property (glTF extras) that the
@@ -431,7 +432,7 @@ def _gantry_crane(pb: PartBuilder, x_left: float, x_right: float, y: float, heig
     return pb
 
 
-def _jib_crane(pb: PartBuilder, x: float, y: float) -> PartBuilder:
+def _jib_crane(pb: PartBuilder, x: float, y: float, boom_length: float = 46.0) -> PartBuilder:
     """Rail-mounted level-luffing quay crane: portal, slewing tower, cabin, inclined boom toward the sea (+X)."""
     for lx in (x - 10.0, x + 10.0):
         for ly in (y - 6.0, y + 6.0):
@@ -441,7 +442,7 @@ def _jib_crane(pb: PartBuilder, x: float, y: float) -> PartBuilder:
     pb.box((x - 3.0, y, 32.5), (12.0, 6.0, 5.0))  # machinery house
     pb.box((x + 3.5, y - 3.6, 31.5), (3.0, 2.2, 3.0))  # operator cabin
     pb.box((x - 10.5, y, 32.0), (4.0, 5.0, 4.0))  # counterweight
-    angle, length = 32.0, 46.0
+    angle, length = 32.0, boom_length
     pivot = Vector((x + 3.0, y, 33.0))
     direction = Vector((math.cos(math.radians(angle)), 0.0, math.sin(math.radians(angle))))
     center = pivot + direction * (length / 2)
@@ -449,6 +450,23 @@ def _jib_crane(pb: PartBuilder, x: float, y: float) -> PartBuilder:
     tip = pivot + direction * length
     pb.cylinder((tip.x, y, tip.z / 2 + 4.0), 0.25, tip.z - 8.0, segments=6)  # hoist rope
     pb.box((tip.x, y, 3.0), (2.0, 2.0, 2.0))  # hook block
+    return pb
+
+
+def _wing_crane(pb: PartBuilder, x: float, y: float, deck_z: float) -> PartBuilder:
+    """Floating-dock wing-wall travelling crane: portal on the wing wall, tower, boom over the dock (+X)."""
+    for ly in (y - 4.0, y + 4.0):
+        pb.box((x, ly, deck_z + 2.5), (3.0, 1.2, 5.0))  # portal legs on the wing-wall rails
+    pb.box((x, y, deck_z + 5.5), (4.0, 10.0, 1.0))  # portal deck
+    pb.cylinder((x, y, deck_z + 10.0), 1.2, 8.0, segments=12)  # tower
+    pb.box((x - 1.0, y, deck_z + 14.5), (5.0, 3.5, 2.5))  # machinery house + cabin
+    angle, length = 18.0, 26.0
+    pivot = Vector((x + 1.0, y, deck_z + 14.5))
+    direction = Vector((math.cos(math.radians(angle)), 0.0, math.sin(math.radians(angle))))
+    pb.box(tuple(pivot + direction * (length / 2)), (length, 1.0, 1.0), rot_y_deg=-angle)  # boom
+    tip = pivot + direction * length
+    pb.cylinder((tip.x, y, tip.z - 6.0), 0.15, 12.0, segments=6)  # hoist rope
+    pb.box((tip.x, y, tip.z - 12.5), (1.2, 1.2, 1.2))  # hook block
     return pb
 
 
@@ -656,13 +674,19 @@ def build_shipyard(col: bpy.types.Collection) -> None:
     _gantry_crane(PartBuilder(), 141.5, 194.5, 320, 55, 168).build("NODE_CRN_DRYDOCK_PORTAL_400T", crane_blue, col)
     _jib_crane(PartBuilder(), 780, 150).build("NODE_CRN_QUAY_JIB_50T_01", crane_yellow, col)
     _jib_crane(PartBuilder(), 780, 330).build("NODE_CRN_QUAY_JIB_50T_02", crane_yellow, col)
+    _jib_crane(PartBuilder(), 780, 415, boom_length=36.0).build("NODE_CRN_QUAY_LUFFING_28T", crane_yellow, col)
+    _wing_crane(PartBuilder(), 842, 560, 14.0).build("NODE_CRN_FLOATING_DOCK_WING_25T", crane_yellow, col)
 
     # ---- Newbuild NB-1001 on the building berth (stern toward the sea) --------
+    # Every block is modelled at its ERECTED position inside the hull. The viewer
+    # moves blocks that are still in production to the yard area recorded in
+    # public.production_activities (or hides them before fabrication starts).
     keel = 2.0
     hull_x0, hull_x1 = 54.0, 86.0
+    body_end = 170.0
     envelope = PartBuilder()
-    _slab(envelope, hull_x0, hull_x1, 36, 230, keel, keel + 22.0)
-    envelope.wedge((70, 230), hull_x1 - hull_x0, 30.0, keel, keel + 22.0, "Y+")
+    _slab(envelope, hull_x0, hull_x1, 36, body_end, keel, keel + 22.0)
+    envelope.wedge((70, body_end), hull_x1 - hull_x0, 26.0, keel, keel + 22.0, "Y+")
     envelope.build("CTX_NB1001_HULL_ENVELOPE", ghost_hull, col, ctx_opacity=0.12)
 
     def double_bottom(y0: float, y1: float) -> PartBuilder:
@@ -677,9 +701,10 @@ def build_shipyard(col: bpy.types.Collection) -> None:
 
     double_bottom(36, 60).build("NODE_NB1001_BLOCK_DB_101", primer, col)
     double_bottom(60, 84).build("NODE_NB1001_BLOCK_DB_102", primer, col)
+    double_bottom(84, 108).build("NODE_NB1001_BLOCK_DB_103", primer, col)
 
-    er = PartBuilder()  # engine-room block erected on top of DB-101
     base = keel + 2.7
+    er = PartBuilder()  # engine-room block erected on top of DB-101
     for x in (hull_x0 + 0.5, hull_x1 - 0.5):
         er.box((x, 48, base + 7.0), (1.0, 24.0, 14.0))  # side shell + frames
     er.box((70, 59.5, base + 7.0), (hull_x1 - hull_x0, 1.0, 14.0))  # forward ER bulkhead
@@ -687,17 +712,41 @@ def build_shipyard(col: bpy.types.Collection) -> None:
     er.box((70, 48, base + 1.0), (8.0, 14.0, 2.0))  # main engine seating
     er.build("NODE_NB1001_BLOCK_ER_301", primer, col)
 
-    ss = PartBuilder()  # side-shell block waiting on the outdoor joining yard
-    ss.box((317.0, 253.0, 7.0), (1.0, 30.0, 12.0))  # shell plating
-    ss.box((323.0, 253.0, 1.4), (12.0, 30.0, 0.6))  # bottom flat / deck
-    for y in [239.0 + i * 3.5 for i in range(9)]:
-        ss.box((319.5, y, 7.0), (4.0, 0.3, 12.0))  # web frames
-    ss.box((319.5, 253.0, 9.5), (4.0, 30.0, 0.4))  # side stringer
-    ss.build("NODE_NB1001_BLOCK_SS_201", primer, col)
+    def side_shell(x_shell: float, inward: float) -> PartBuilder:
+        """Cargo-hold side-shell block (y 60..108): shell, hopper flat, web frames, stringer."""
+        pb = PartBuilder()
+        pb.box((x_shell, 84.0, base + 6.5), (1.0, 48.0, 13.0))  # shell plating
+        pb.box((x_shell + inward * 6.0, 84.0, base + 0.3), (11.0, 48.0, 0.6))  # hopper / bottom flat
+        for y in [61.0 + i * 4.0 for i in range(12)]:
+            pb.box((x_shell + inward * 2.5, y, base + 6.5), (4.0, 0.3, 13.0))  # web frames
+        pb.box((x_shell + inward * 2.5, 84.0, base + 9.0), (4.0, 48.0, 0.4))  # side stringer
+        return pb
 
-    bow = PartBuilder()  # bow block outside the paint hall (coating in progress)
-    bow.wedge((262.0, 375.0), 30.0, 26.0, 1.0, 17.0, "X-")
-    bow.box((262.5, 375.0, 9.0), (1.0, 30.0, 16.0))  # collision bulkhead
+    side_shell(hull_x0 + 0.5, 1.0).build("NODE_NB1001_BLOCK_SS_201", primer, col)  # port (bow = +Y)
+    side_shell(hull_x1 - 0.5, -1.0).build("NODE_NB1001_BLOCK_SS_202", primer, col)  # starboard
+
+    dk = PartBuilder()  # main-deck block with cargo hatch coaming
+    deck_z = base + 13.2
+    dk.box((70, 84, deck_z), (hull_x1 - hull_x0, 48.0, 0.4))  # deck plating
+    for y in [62.0 + i * 4.0 for i in range(12)]:
+        dk.box((70, y, deck_z - 0.6), (hull_x1 - hull_x0 - 2, 0.25, 0.8))  # deck beams
+    for x in (60.0, 80.0):
+        dk.box((x, 84, deck_z + 1.1), (0.5, 30.0, 1.8))  # hatch side coamings
+    for y in (69.0, 99.0):
+        dk.box((70, y, deck_z + 1.1), (20.5, 0.5, 1.8))  # hatch end coamings
+    dk.build("NODE_NB1001_BLOCK_DK_401", primer, col)
+
+    acc = PartBuilder()  # accommodation / superstructure block on top of the engine room
+    top = base + 14.0
+    acc.box((70, 47, top + 2.0), (24.0, 18.0, 4.0))  # A-deck
+    acc.box((70, 47, top + 6.0), (20.0, 15.0, 4.0))  # B-deck
+    acc.box((70, 51, top + 9.5), (30.0, 7.0, 3.0))  # wheelhouse with bridge wings
+    acc.cylinder((70, 39, top + 9.0), 2.2, 10.0, segments=12)  # funnel casing
+    acc.build("NODE_NB1001_BLOCK_ACC_601", primer, col)
+
+    bow = PartBuilder()  # bow block (forepeak) at the stem
+    bow.wedge((70.0, body_end), hull_x1 - hull_x0, 26.0, keel, keel + 18.0, "Y+")
+    bow.box((70.0, body_end + 0.5, keel + 9.0), (hull_x1 - hull_x0, 1.0, 18.0))  # collision bulkhead
     bow.build("NODE_NB1001_BLOCK_BOW_501", primer, col)
 
     # ---- Production flow arrows (context) -------------------------------------

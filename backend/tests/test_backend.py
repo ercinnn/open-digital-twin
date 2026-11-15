@@ -108,6 +108,28 @@ def test_seed_categories_have_sensor_profiles() -> None:
     assert not missing, f"Seed categories without a telemetry profile: {sorted(missing)}"
 
 
+def test_shipyard_seed_references_existing_mesh_nodes() -> None:
+    """Every NODE_* id used by the shipyard operations seed (schedule locations,
+    bookings, staffing, permits, ...) must be a component of the demo project."""
+    seed = SEED_SQL.read_text(encoding="utf-8")
+    operations = seed.split("-- Shipyard operations (project 3)", 1)[1]
+    referenced = set(re.findall(r"'(NODE_[A-Z0-9_]+)'", operations))
+    known = set(_seed_mesh_node_ids("33333333-3333-3333-3333-333333333333"))
+    assert referenced, "no mesh node references found in the operations seed"
+    assert referenced <= known, f"Unknown mesh nodes in the operations seed: {sorted(referenced - known)}"
+
+
+def test_shipyard_migrations_secure_every_new_table() -> None:
+    """Tables created by the shipyard migrations get RLS via _odt_secure_table."""
+    migrations = sorted((SEED_SQL.parent / "migrations").glob("0*_shipyard_*.sql"))
+    assert len(migrations) >= 6
+    for path in migrations:
+        sql = path.read_text(encoding="utf-8")
+        created = set(re.findall(r"create table if not exists public\.(\w+)", sql))
+        secured = set(re.findall(r"_odt_secure_table\('(\w+)'", sql))
+        assert created <= secured, f"{path.name}: tables without RLS helper {sorted(created - secured)}"
+
+
 def test_sample_models_satisfy_mapping_contract() -> None:
     expected = {
         "nb42_engine_room.glb": {
@@ -119,7 +141,7 @@ def test_sample_models_satisfy_mapping_contract() -> None:
         "villa_b04.glb": {"NODE_RC_COLUMN_S01", "NODE_HEAT_PUMP_UNIT", "NODE_CONCEALED_PIPE_KITCHEN"},
         "demo_shipyard.glb": set(_seed_mesh_node_ids("33333333-3333-3333-3333-333333333333")),
     }
-    assert len(expected["demo_shipyard.glb"]) == 29
+    assert len(expected["demo_shipyard.glb"]) == 35
     for filename, nodes in expected.items():
         path = SAMPLE_MODELS_DIR / filename
         if not path.exists():

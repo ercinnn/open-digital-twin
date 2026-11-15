@@ -11,6 +11,13 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../auth/presentation/widgets/account_button.dart';
 import '../../../projects/domain/entities/project.dart';
 import '../../../projects/presentation/providers/project_providers.dart';
+import '../../../shipyard/domain/entities/production_entities.dart';
+import '../../../shipyard/presentation/providers/scene_view_providers.dart';
+import '../../../shipyard/presentation/providers/shipyard_providers.dart';
+import '../../../shipyard/presentation/widgets/marker_details.dart';
+import '../../../shipyard/presentation/widgets/operations_dock.dart';
+import '../../../shipyard/presentation/widgets/scene_actions.dart';
+import '../../../shipyard/presentation/widgets/scene_menus.dart';
 import '../../domain/entities/twin_entities.dart';
 import '../providers/twin_providers.dart';
 import '../viewer/three_viewer_controller.dart';
@@ -38,8 +45,20 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
   double? _loadProgress;
   String? _viewerError;
   List<String> _meshNodesInModel = const [];
+  DockMode _dockMode = DockMode.normal;
+
+  /// Color mode chosen in the palette menu; overlays temporarily replace it.
+  ViewerColorMode _baseColorMode = ViewerColorMode.status;
 
   String get _projectId => widget.projectId;
+
+  late final SceneActions _sceneActions = SceneActions(
+    selectNode: (meshNodeId) {
+      ref.read(selectedNodeProvider(_projectId).notifier).select(meshNodeId);
+      _viewer.selectNode(meshNodeId, focus: true);
+    },
+    focusNodes: (ids) => _viewer.focusNodes(ids),
+  );
 
   @override
   void initState() {
@@ -55,6 +74,36 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
       final list = next.value;
       if (list != null) _viewer.setStatuses({for (final c in list) c.meshNodeId: c.status.dbValue});
     }, fireImmediately: true);
+    // Shipyard: blocks follow the production schedule (live or timeline date).
+    ref.listenManual<Map<String, BlockPlacement>>(blockPlacementsProvider(_projectId), (_, next) {
+      _viewer.setPlacements({for (final e in next.entries) e.key: e.value.toViewerJson()});
+    }, fireImmediately: true);
+    ref.listenManual<Map<String, String>>(sceneHighlightsProvider(_projectId), (_, next) {
+      _viewer.setHighlights(next);
+    }, fireImmediately: true);
+    ref.listenManual<List<ViewerMarker>>(sceneMarkersProvider(_projectId), (_, next) {
+      _viewer.setMarkers(next);
+    }, fireImmediately: true);
+    ref.listenManual<Map<String, String>>(overlayColorsProvider(_projectId), (_, next) {
+      _viewer.setOverlay(next);
+    }, fireImmediately: true);
+    ref.listenManual<SceneViewState>(sceneViewProvider(_projectId), (_, next) {
+      _viewer.setColorMode(next.overlay != null ? ViewerColorMode.overlay : _baseColorMode);
+      _viewer.setLabels(ref.read(sceneLabelsProvider(_projectId)), visible: next.labels);
+      if (mounted) setState(() {});
+    }, fireImmediately: true);
+    ref.listenManual<Map<String, String>>(sceneLabelsProvider(_projectId), (_, next) {
+      _viewer.setLabels(next, visible: ref.read(sceneViewProvider(_projectId)).labels);
+    }, fireImmediately: true);
+    ref.listenManual<Set<String>>(sceneHiddenProvider(_projectId), (_, next) {
+      _viewer.setHidden(next);
+    }, fireImmediately: true);
+  }
+
+  void _setBaseColorMode(ViewerColorMode mode) {
+    _baseColorMode = mode;
+    ref.read(sceneViewProvider(_projectId).notifier).setOverlay(null);
+    _viewer.setColorMode(mode);
   }
 
   @override
@@ -93,6 +142,9 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
         setState(() => _viewerError = message);
       case NodeSelected(:final meshNodeId):
         ref.read(selectedNodeProvider(_projectId).notifier).select(meshNodeId);
+      case MarkerSelected(:final markerId, :final meshNodeId):
+        ref.read(selectedNodeProvider(_projectId).notifier).select(meshNodeId);
+        showMarkerDetails(context, ref, _projectId, markerId);
     }
   }
 
@@ -157,6 +209,24 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
       data: (list) => ComponentTree(components: list, selectedNodeId: selectedNode, onSelect: _selectFromTree),
     );
     final inspector = InspectorPanel(projectId: _projectId);
+    final shipyard = ref.watch(shipyardEnabledProvider(_projectId));
+    final dock = OperationsDock(
+      projectId: _projectId,
+      actions: _sceneActions,
+      mode: _dockMode,
+      onModeChanged: (m) => setState(() => _dockMode = m),
+    );
+    // The viewport keeps the same position in the tree whether or not the dock is
+    // shown, so the WebView / iframe is not recreated when shipyard data arrives.
+    final viewportArea = Column(
+      children: [
+        Expanded(flex: !shipyard ? 1 : (_dockMode == DockMode.maximized ? 3 : 6), child: viewport),
+        if (shipyard && _dockMode == DockMode.collapsed)
+          SizedBox(height: 41, child: dock)
+        else if (shipyard)
+          Expanded(flex: _dockMode == DockMode.maximized ? 7 : 4, child: dock),
+      ],
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -177,6 +247,10 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
           const SizedBox(width: 8),
           _SimulationControls(projectId: _projectId, onSimulateOnce: _simulateOnce),
           const SizedBox(width: 4),
+          if (shipyard) ...[
+            CameraPresetMenu(projectId: _projectId, actions: _sceneActions, onReset: _viewer.resetCamera),
+            SceneLayersMenu(projectId: _projectId),
+          ],
           PopupMenuButton<String>(
             tooltip: 'View options',
             icon: const Icon(Icons.palette_outlined),
@@ -184,11 +258,14 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
               setState(() {
                 switch (v) {
                   case 'status':
-                    _viewer.setColorMode(ViewerColorMode.status);
+                    _setBaseColorMode(ViewerColorMode.status);
                   case 'material':
-                    _viewer.setColorMode(ViewerColorMode.material);
+                    _setBaseColorMode(ViewerColorMode.material);
                   case 'reset':
                     _viewer.resetCamera();
+                  default:
+                    final overlay = SceneOverlay.values.where((o) => o.name == v).firstOrNull;
+                    if (overlay != null) ref.read(sceneViewProvider(_projectId).notifier).setOverlay(overlay);
                 }
               });
             },
@@ -203,6 +280,13 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
                 checked: _viewer.colorMode == ViewerColorMode.material,
                 child: const Text('Original materials'),
               ),
+              if (shipyard)
+                for (final o in SceneOverlay.values)
+                  CheckedPopupMenuItem(
+                    value: o.name,
+                    checked: ref.read(sceneViewProvider(_projectId)).overlay == o,
+                    child: Text(o.label),
+                  ),
               const PopupMenuDivider(),
               const PopupMenuItem(value: 'reset', child: Text('Reset camera')),
             ],
@@ -232,7 +316,7 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
                               ),
                             ),
                             const VerticalDivider(width: 1),
-                            Expanded(child: viewport),
+                            Expanded(child: viewportArea),
                           ],
                         ),
                       ),
@@ -254,17 +338,34 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
                     Expanded(
                       flex: 5,
                       child: DefaultTabController(
-                        length: 2,
+                        key: ValueKey(shipyard),
+                        length: shipyard ? 3 : 2,
                         initialIndex: selectedNode == null ? 0 : 1,
                         child: Column(
                           children: [
-                            const TabBar(
+                            TabBar(
                               tabs: [
-                                Tab(text: 'Components'),
-                                Tab(text: 'Inspector'),
+                                const Tab(text: 'Components'),
+                                const Tab(text: 'Inspector'),
+                                if (shipyard) const Tab(text: 'Operations'),
                               ],
                             ),
-                            Expanded(child: TabBarView(children: [tree, inspector])),
+                            Expanded(
+                              child: TabBarView(
+                                physics: const NeverScrollableScrollPhysics(),
+                                children: [
+                                  tree,
+                                  inspector,
+                                  if (shipyard)
+                                    OperationsDock(
+                                      projectId: _projectId,
+                                      actions: _sceneActions,
+                                      mode: DockMode.normal,
+                                      onModeChanged: (_) {},
+                                    ),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
                       ),
