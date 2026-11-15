@@ -72,6 +72,118 @@ enum HullStatus {
       HullStatus.values.firstWhere((s) => s.dbValue == value, orElse: () => HullStatus.planned);
 }
 
+/// Mirrors the `hulls.contract_type` check constraint.
+enum HullContractType {
+  newbuild('newbuild', 'New build'),
+  repair('repair', 'Repair'),
+  conversion('conversion', 'Conversion');
+
+  const HullContractType(this.dbValue, this.label);
+
+  final String dbValue;
+  final String label;
+}
+
+/// Mesh categories a hull can lie at (`hulls.location_node_id`).
+const hullLocationCategories = ['docks_and_berths', 'floating_dock', 'outfitting_quay'];
+
+/// A new hull entered by an editor (insert into `hulls`).
+class HullDraft {
+  const HullDraft({
+    required this.projectId,
+    required this.hullNo,
+    this.contractType = HullContractType.newbuild,
+    this.status = HullStatus.planned,
+    this.name,
+    this.shipType,
+    this.ownerName,
+    this.classSociety,
+    this.lengthM,
+    this.beamM,
+    this.deadweightT,
+    this.contractDate,
+    this.steelCuttingDate,
+    this.keelLayingDate,
+    this.launchingDate,
+    this.contractDeliveryDate,
+    this.forecastDeliveryDate,
+    this.locationNodeId,
+  });
+
+  final String projectId;
+  final String hullNo;
+  final HullContractType contractType;
+  final HullStatus status;
+  final String? name;
+  final String? shipType;
+  final String? ownerName;
+  final String? classSociety;
+  final double? lengthM;
+  final double? beamM;
+  final double? deadweightT;
+  final DateTime? contractDate;
+  final DateTime? steelCuttingDate;
+  final DateTime? keelLayingDate;
+  final DateTime? launchingDate;
+  final DateTime? contractDeliveryDate;
+
+  /// Defaults to [contractDeliveryDate] when not given (see [effectiveForecastDelivery]).
+  final DateTime? forecastDeliveryDate;
+  final String? locationNodeId;
+
+  /// Hull numbers are stored trimmed and upper case (e.g. `NB-1004`).
+  String get normalizedHullNo => hullNo.trim().toUpperCase();
+
+  DateTime? get effectiveForecastDelivery => forecastDeliveryDate ?? contractDeliveryDate;
+
+  /// Repairs have no steel cutting / keel laying / launching.
+  bool get hasBuildMilestones => contractType != HullContractType.repair;
+
+  /// Human-readable problems; empty when the draft can be saved.
+  List<String> validationErrors({Iterable<String> existingHullNos = const []}) {
+    final errors = <String>[];
+    final no = normalizedHullNo;
+    if (no.isEmpty) {
+      errors.add('Enter a hull number.');
+    } else if (no.length > 30) {
+      errors.add('The hull number may have at most 30 characters.');
+    } else if (existingHullNos.any((e) => e.trim().toUpperCase() == no)) {
+      errors.add('Hull number $no already exists in this yard.');
+    }
+
+    for (final (label, value) in [('Length', lengthM), ('Beam', beamM), ('Deadweight', deadweightT)]) {
+      if (value != null && value <= 0) errors.add('$label must be greater than 0.');
+    }
+    if (lengthM != null && beamM != null && lengthM! > 0 && beamM! >= lengthM!) {
+      errors.add('Beam must be smaller than the length.');
+    }
+
+    // Milestones must not run backwards (only the dates that are filled in are compared).
+    final milestones = <(String, DateTime?)>[
+      ('Contract', contractDate),
+      if (hasBuildMilestones) ...[
+        ('Steel cutting', steelCuttingDate),
+        ('Keel laying', keelLayingDate),
+        ('Launching', launchingDate),
+      ],
+      ('Contract delivery', contractDeliveryDate),
+    ];
+    (String, DateTime)? previous;
+    for (final (label, date) in milestones) {
+      if (date == null) continue;
+      if (previous != null && date.isBefore(previous.$2)) {
+        errors.add('$label (${formatDate(date)}) is before ${previous.$1.toLowerCase()} (${formatDate(previous.$2)}).');
+      }
+      previous = (label, date);
+    }
+    final forecast = effectiveForecastDelivery;
+    if (forecast != null && contractDate != null && forecast.isBefore(contractDate!)) {
+      errors.add('Forecast delivery is before the contract date.');
+    }
+    return errors;
+  }
+}
+
 /// Table `hulls`.
 class Hull {
   const Hull({

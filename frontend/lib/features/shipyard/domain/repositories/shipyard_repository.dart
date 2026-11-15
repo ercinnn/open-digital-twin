@@ -20,6 +20,9 @@ abstract interface class ShipyardRepository {
   // ---- Production (005) -------------------------------------------------------
   Future<List<Hull>> fetchHulls(String projectId);
 
+  /// Creates a hull (editors). Throws [ShipyardException] e.g. for a duplicate hull number.
+  Future<Hull> createHull(HullDraft draft);
+
   /// Realtime schedule rows of a project.
   Stream<List<ProductionActivity>> watchActivities(String projectId);
 

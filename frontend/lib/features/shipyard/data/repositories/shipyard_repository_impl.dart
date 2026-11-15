@@ -49,6 +49,21 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
   }
 
   @override
+  Future<Hull> createHull(HullDraft draft) async {
+    try {
+      final row = await supabase.from('hulls').insert(HullModel.insert(draft)).select().single();
+      return HullModel.fromJson(row);
+    } on PostgrestException catch (e) {
+      if (e.code == '23505') {
+        throw ShipyardException('Hull number ${draft.normalizedHullNo} already exists in this yard.');
+      }
+      _rethrow(e);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
   Stream<List<ProductionActivity>> watchActivities(String projectId) {
     return supabase
         .from('production_activities')

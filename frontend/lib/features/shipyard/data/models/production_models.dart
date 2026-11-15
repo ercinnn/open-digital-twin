@@ -26,6 +26,32 @@ class HullModel {
     locationNodeId: json['location_node_id'] as String?,
     metadata: readMap(json['metadata']),
   );
+
+  /// Row for `insert into hulls`. Build milestones are dropped for repairs.
+  static Map<String, dynamic> insert(HullDraft d) {
+    String? text(String? v) => v == null || v.trim().isEmpty ? null : v.trim();
+    final build = d.hasBuildMilestones;
+    return {
+      'project_id': d.projectId,
+      'hull_no': d.normalizedHullNo,
+      'name': text(d.name),
+      'ship_type': text(d.shipType),
+      'contract_type': d.contractType.dbValue,
+      'owner_name': text(d.ownerName),
+      'class_society': text(d.classSociety),
+      'length_m': d.lengthM,
+      'beam_m': d.beamM,
+      'deadweight_t': d.deadweightT,
+      'contract_date': writeDate(d.contractDate),
+      'steel_cutting_date': build ? writeDate(d.steelCuttingDate) : null,
+      'keel_laying_date': build ? writeDate(d.keelLayingDate) : null,
+      'launching_date': build ? writeDate(d.launchingDate) : null,
+      'contract_delivery_date': writeDate(d.contractDeliveryDate),
+      'forecast_delivery_date': writeDate(d.effectiveForecastDelivery),
+      'status': d.status.dbValue,
+      'location_node_id': text(d.locationNodeId),
+    };
+  }
 }
 
 class ProductionActivityModel {

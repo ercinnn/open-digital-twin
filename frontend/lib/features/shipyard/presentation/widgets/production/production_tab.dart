@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/theme/app_theme.dart';
 import '../../../../../shared/widgets/async_states.dart';
+import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../digital_twin/domain/entities/twin_entities.dart';
 import '../../../../digital_twin/presentation/providers/twin_providers.dart';
 import '../../../domain/entities/production_entities.dart';
@@ -11,6 +12,7 @@ import '../../providers/shipyard_providers.dart';
 import '../scene_actions.dart';
 import 'activity_dialog.dart';
 import 'gantt_chart.dart';
+import 'hull_dialog.dart';
 import 'timeline_bar.dart';
 
 /// Production schedule: Gantt per hull / block + 3D timeline scrubber.
@@ -107,6 +109,35 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     );
   }
 
+  Future<void> _newHull(List<Hull> hulls, List<TwinComponent> components) async {
+    final hull = await NewHullDialog.show(
+      context,
+      projectId: widget.projectId,
+      existingHulls: hulls,
+      locations: components.where((c) => hullLocationCategories.contains(c.category)).toList(),
+    );
+    if (hull == null || !mounted) return;
+    ref.invalidate(hullsProvider(widget.projectId));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Hull ${hull.displayName} created. It is listed on the Dashboard; '
+          'it appears here once it has schedule rows.',
+        ),
+      ),
+    );
+  }
+
+  Widget _newHullButton(List<Hull> hulls, List<TwinComponent> components) => Padding(
+    padding: const EdgeInsets.only(left: 4),
+    child: FilledButton.tonalIcon(
+      style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+      onPressed: () => _newHull(hulls, components),
+      icon: const Icon(Icons.add, size: 18),
+      label: const Text('New hull'),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final projectId = widget.projectId;
@@ -117,13 +148,28 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     final today = ref.watch(todayProvider);
     final sceneDate = ref.watch(sceneDateProvider(projectId));
     final selectedComponent = ref.watch(selectedComponentProvider(projectId));
+    final canEdit = ref.watch(isEditorProvider);
 
     if (hulls.hasError) return ErrorView(error: hulls.error!);
     if (activities.hasError) return ErrorView(error: activities.error!);
     if (!hulls.hasValue || !activities.hasValue) return const LoadingView();
     final range = schedule.range(today);
     if (range == null) {
-      return const EmptyView(icon: Icons.view_timeline_outlined, message: 'No production schedule for this project.');
+      return Column(
+        children: [
+          if (canEdit)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 6, 6, 0),
+                child: _newHullButton(hulls.value!, components),
+              ),
+            ),
+          const Expanded(
+            child: EmptyView(icon: Icons.view_timeline_outlined, message: 'No production schedule for this project.'),
+          ),
+        ],
+      );
     }
 
     final byId = componentsById(components);
@@ -188,6 +234,7 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
                 onPressed: () => _gantt.currentState?.scrollToDate(sceneDate),
                 icon: const Icon(Icons.center_focus_strong, size: 18),
               ),
+              if (canEdit) _newHullButton(hullList, components),
             ],
           ),
         ),
