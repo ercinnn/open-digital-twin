@@ -17,10 +17,18 @@
  *             set_highlights{highlights:{mesh_node_id:"#rrggbb"}}       (blinking emissive)
  *             set_labels{labels:{mesh_node_id:text}, visible:bool}
  *             set_hidden{mesh_node_ids:[...]}                          (layer filter)
+ *             set_procedural{nodes:[{id, origin:[x,y,z], color, ctx_opacity?, parts:[...]}]}
+ *                 geometry built in the app (hull blocks without a GLB mesh); hull coordinates
+ *                 u (aft -> fore), v (+ starboard), h (up) map to x = o.x + v, y = o.y + h, z = o.z - u.
+ *                 parts: {kind:"section", pts:[[v,h]..], holes?, u0, u1} (extruded along the hull),
+ *                        {kind:"plan", pts:[[u,v]..], holes?, h0, h1} (extruded upward),
+ *                        {kind:"cyl", axis:"h", u, v, h0, h1, r0, r1} | {kind:"cyl", axis:"v", u, h, v0, v1, r0}.
+ *                 Ids already in the GLB keep the GLB mesh; CTX_* ids are ghosted context.
  *
  * Three -> Flutter ("ThreeToFlutter"):
  *   json = {"channel":"ThreeToFlutter","type":<event>,"payload":{...}}
  *   events: viewer_ready, model_progress{loaded,total}, model_loaded{mesh_node_ids,url},
+ *           scene_nodes{mesh_node_ids} (GLB + app-built nodes, after every change),
  *           model_error{message}, node_selected{mesh_node_id|null}, marker_selected{id},
  *           viewer_error{message}
  */
@@ -77,6 +85,7 @@
     var OrbitControls = (await import('three/addons/controls/OrbitControls.js')).OrbitControls;
     var GLTFLoader = (await import('three/addons/loaders/GLTFLoader.js')).GLTFLoader;
     var RoomEnvironment = (await import('three/addons/environments/RoomEnvironment.js')).RoomEnvironment;
+    var mergeGeometries = (await import('three/addons/utils/BufferGeometryUtils.js')).mergeGeometries;
 
     var container = document.getElementById('viewport');
     var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -123,6 +132,9 @@
     var labelTexts = {};          // mesh_node_id -> text
     var labelsVisible = false;
     var markerSpecs = [];         // [{id, mesh_node_id, u, v, w, color, label}]
+    var proceduralSpecs = [];     // set_procedural nodes
+    var proceduralGroup = new THREE.Group();
+    scene.add(proceduralGroup);
     var markerGroup = new THREE.Group();
     var labelGroup = new THREE.Group();
     scene.add(markerGroup);
@@ -206,6 +218,132 @@
       disposeSprites(markerGroup);
       disposeSprites(labelGroup);
       clearSelectionBox();
+      buildProcedural();
+    }
+
+    // -------------------------------------------------------------- app-built geometry
+    function shapeOf(points, holes) {
+      var shape = new THREE.Shape(points.map(function (p) { return new THREE.Vector2(p[0], p[1]); }));
+      (holes || []).forEach(function (h) {
+        shape.holes.push(new THREE.Path(h.map(function (p) { return new THREE.Vector2(p[0], p[1]); })));
+      });
+      return shape;
+    }
+
+    function swapUV(points) { return points.map(function (p) { return [p[1], p[0]]; }); }
+
+    function validPolygon(points) { return Array.isArray(points) && points.length >= 3; }
+
+    // One part in world coordinates (non-indexed, so the parts of a node can be merged).
+    function partGeometry(part, o) {
+      var g = null;
+      if (part.kind === 'section' && validPolygon(part.pts) && part.u1 > part.u0) {
+        g = new THREE.ExtrudeGeometry(shapeOf(part.pts, part.holes), { depth: part.u1 - part.u0, bevelEnabled: false });
+        g.translate(o[0], o[1], o[2] - part.u1);
+      } else if (part.kind === 'plan' && validPolygon(part.pts) && part.h1 > part.h0) {
+        // Shape in (v, u), extruded along +z, then rotated: (x, y, z) -> (x, z, -y).
+        g = new THREE.ExtrudeGeometry(
+          shapeOf(swapUV(part.pts), (part.holes || []).map(swapUV)),
+          { depth: part.h1 - part.h0, bevelEnabled: false }
+        );
+        g.rotateX(-Math.PI / 2);
+        g.translate(o[0], o[1] + part.h0, o[2]);
+      } else if (part.kind === 'cyl' && part.axis === 'v' && part.v1 > part.v0 && part.r0 > 0) {
+        g = new THREE.CylinderGeometry(part.r0, part.r0, part.v1 - part.v0, 20);
+        g.rotateZ(-Math.PI / 2);
+        g.translate(o[0] + (part.v0 + part.v1) / 2, o[1] + part.h, o[2] - part.u);
+      } else if (part.kind === 'cyl' && part.h1 > part.h0 && part.r0 > 0) {
+        g = new THREE.CylinderGeometry(part.r1 > 0 ? part.r1 : part.r0, part.r0, part.h1 - part.h0, 20);
+        g.translate(o[0] + part.v, o[1] + (part.h0 + part.h1) / 2, o[2] - part.u);
+      }
+      if (!g) return null;
+      if (g.index) {
+        var flat = g.toNonIndexed();
+        g.dispose();
+        g = flat;
+      }
+      g.clearGroups();
+      return g;
+    }
+
+    function nodeGeometry(spec) {
+      var o = Array.isArray(spec.origin) && spec.origin.length === 3 ? spec.origin : [0, 0, 0];
+      var parts = (spec.parts || []).map(function (p) { return partGeometry(p, o); }).filter(Boolean);
+      if (!parts.length) return null;
+      if (parts.length === 1) return parts[0];
+      var merged = mergeGeometries(parts, false);
+      parts.forEach(function (g) { g.dispose(); });
+      return merged;
+    }
+
+    function removeProcedural() {
+      proceduralGroup.children.slice().forEach(function (obj) {
+        proceduralGroup.remove(obj);
+        obj.traverse(function (child) {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) child.material.dispose();
+          if (child.userData.originalMaterial) child.userData.originalMaterial.dispose();
+        });
+        var id = obj.userData.mesh_node_id;
+        if (id && nodes.get(id) === obj) nodes.delete(id);
+      });
+      pickables = pickables.filter(function (m) { return !m.userData.procedural; });
+    }
+
+    // Rebuilds the app-built nodes; ids that exist in the GLB keep their GLB mesh.
+    function buildProcedural() {
+      removeProcedural();
+      proceduralSpecs.forEach(function (spec) {
+        var id = spec && spec.id;
+        if (typeof id !== 'string' || nodes.has(id)) return;
+        var geometry = nodeGeometry(spec);
+        if (!geometry) return;
+        var color = parseColor(spec.color || '#9a4a32', 0x9a4a32);
+        if (/^CTX_/.test(id)) {
+          var opacity = typeof spec.ctx_opacity === 'number' && spec.ctx_opacity > 0 ? Math.min(spec.ctx_opacity, 1) : 0.16;
+          var ghost = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+            color: color, transparent: opacity < 0.99, opacity: opacity, depthWrite: opacity >= 0.99, roughness: 0.9,
+          }));
+          ghost.name = id;
+          ghost.renderOrder = 1;
+          proceduralGroup.add(ghost);
+          return;
+        }
+        var original = new THREE.MeshStandardMaterial({ color: color, metalness: 0.3, roughness: 0.65 });
+        var mesh = new THREE.Mesh(geometry, original.clone());
+        mesh.userData.originalMaterial = original;
+        mesh.userData.procedural = true;
+        var edges = new THREE.LineSegments(
+          new THREE.EdgesGeometry(geometry, 25),
+          new THREE.LineBasicMaterial({ color: 0x1c0f0a, transparent: true, opacity: 0.55 })
+        );
+        var node = new THREE.Group();
+        node.name = id;
+        node.userData.mesh_node_id = id;
+        node.userData.homePosition = node.position.clone();
+        node.userData.homeBox = null;
+        node.userData.move = null;
+        node.add(mesh);
+        node.add(edges);
+        proceduralGroup.add(node);
+        nodes.set(id, node);
+        pickables.push(mesh);
+      });
+      proceduralGroup.updateMatrixWorld(true);
+    }
+
+    function emitSceneNodes() {
+      emit('scene_nodes', { mesh_node_ids: Array.from(nodes.keys()).sort() });
+    }
+
+    function setProcedural(specs) {
+      proceduralSpecs = Array.isArray(specs) ? specs : [];
+      buildProcedural();
+      if (modelRoot) applyPlacements(false); else applyAppearance();
+      updateSelection();
+      rebuildMarkers();
+      rebuildLabels();
+      emitSceneNodes();
     }
 
     // -------------------------------------------------------------- appearance
@@ -517,6 +655,7 @@
         function (gltf) {
           if (token !== loadToken) return;
           modelRoot = gltf.scene;
+          removeProcedural();
           modelRoot.traverse(function (child) {
             if (!child.isMesh) return;
             if (Array.isArray(child.material)) child.material = child.material[0];
@@ -545,6 +684,7 @@
             node.userData.homeBox = null;
             node.userData.move = null;
           });
+          buildProcedural();
           scene.add(modelRoot);
           modelRoot.updateMatrixWorld(true);
 
@@ -558,6 +698,7 @@
           rebuildMarkers();
           rebuildLabels();
           emit('model_loaded', { url: url, mesh_node_ids: Array.from(nodes.keys()).sort() });
+          emitSceneNodes();
         },
         function (xhr) {
           if (token !== loadToken) return;
@@ -646,6 +787,7 @@
           labelsVisible = !!p.visible;
           rebuildLabels();
           break;
+        case 'set_procedural': setProcedural(p.nodes); break;
         case 'set_hidden':
           hiddenIds = new Set(Array.isArray(p.mesh_node_ids) ? p.mesh_node_ids : []);
           applyAppearance();

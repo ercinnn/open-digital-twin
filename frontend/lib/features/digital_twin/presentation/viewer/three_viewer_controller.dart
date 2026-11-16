@@ -23,6 +23,12 @@ class ModelLoaded extends ViewerEvent {
   final List<String> meshNodeIds;
 }
 
+/// All node ids in the scene (GLB + app-built), sent after every change.
+class SceneNodes extends ViewerEvent {
+  const SceneNodes(this.meshNodeIds);
+  final List<String> meshNodeIds;
+}
+
 class ModelError extends ViewerEvent {
   const ModelError(this.message);
   final String message;
@@ -101,6 +107,7 @@ class ThreeViewerController {
   Map<String, String> _labels = const {};
   bool _labelsVisible = false;
   Set<String> _hidden = const {};
+  List<Map<String, dynamic>> _procedural = const [];
 
   Stream<ViewerEvent> get events => _events.stream;
   bool get isReady => _ready;
@@ -142,6 +149,7 @@ class ThreeViewerController {
         (payload['total'] as num?)?.toInt() ?? 0,
       ),
       'model_loaded' => ModelLoaded((payload['mesh_node_ids'] as List<dynamic>? ?? const []).map((e) => '$e').toList()),
+      'scene_nodes' => SceneNodes((payload['mesh_node_ids'] as List<dynamic>? ?? const []).map((e) => '$e').toList()),
       'model_error' => ModelError('${payload['message'] ?? 'Unknown error'}'),
       'node_selected' => NodeSelected(payload['mesh_node_id'] as String?),
       'marker_selected' => MarkerSelected('${payload['id'] ?? ''}', payload['mesh_node_id'] as String?),
@@ -172,6 +180,7 @@ class ThreeViewerController {
     _send('set_highlights', {'highlights': _highlights});
     _send('set_labels', {'labels': _labels, 'visible': _labelsVisible});
     _send('set_hidden', {'mesh_node_ids': _hidden.toList()});
+    _send('set_procedural', {'nodes': _procedural});
     if (_modelUrl != null) _send('load_model', {'url': _modelUrl});
     _send('select_node', {'mesh_node_id': _selected, 'focus': false});
   }
@@ -241,6 +250,13 @@ class ThreeViewerController {
     if (meshNodeIds.length == _hidden.length && meshNodeIds.containsAll(_hidden)) return;
     _hidden = Set.unmodifiable(meshNodeIds);
     _send('set_hidden', {'mesh_node_ids': _hidden.toList()});
+  }
+
+  /// Geometry built in the app (`set_procedural`): hull blocks without a GLB mesh.
+  void setProcedural(List<Map<String, dynamic>> nodes) {
+    if (_sameJson(nodes, _procedural)) return;
+    _procedural = List.unmodifiable(nodes);
+    _send('set_procedural', {'nodes': _procedural});
   }
 
   void resetCamera() => _send('reset_camera');

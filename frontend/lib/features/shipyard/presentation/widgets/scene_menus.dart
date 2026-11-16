@@ -72,12 +72,17 @@ class CameraPresetMenu extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final hullViews = ref.watch(hullCameraViewsProvider(projectId));
     return PopupMenuButton<int>(
       tooltip: 'Camera views',
       icon: const Icon(Icons.videocam_outlined),
       onSelected: (i) {
         if (i < 0) {
           onReset();
+          return;
+        }
+        if (i >= cameraPresets.length) {
+          actions.focusNodes(hullViews[i - cameraPresets.length].$2);
           return;
         }
         actions.focusNodes(cameraPresets[i].nodes);
@@ -87,6 +92,12 @@ class CameraPresetMenu extends ConsumerWidget {
         const PopupMenuDivider(),
         for (final (i, p) in cameraPresets.indexed)
           PopupMenuItem(value: i, child: ListTile(dense: true, leading: Icon(p.icon), title: Text(p.label))),
+        if (hullViews.isNotEmpty) const PopupMenuDivider(),
+        for (final (i, v) in hullViews.indexed)
+          PopupMenuItem(
+            value: cameraPresets.length + i,
+            child: ListTile(dense: true, leading: const Icon(Icons.sailing_outlined), title: Text(v.$1)),
+          ),
       ],
     );
   }

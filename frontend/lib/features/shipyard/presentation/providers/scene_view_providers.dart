@@ -2,9 +2,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../digital_twin/presentation/providers/twin_providers.dart';
 import '../../../digital_twin/presentation/viewer/three_viewer_controller.dart';
+import '../../domain/entities/block_entities.dart';
 import '../../domain/entities/hse_entities.dart';
 import '../../domain/entities/organization_entities.dart';
 import '../../domain/entities/quality_entities.dart';
+import '../../domain/services/hull_block_geometry.dart';
 import '../widgets/scene_actions.dart' show shortComponentName;
 import 'shipyard_providers.dart';
 
@@ -237,6 +239,26 @@ final sceneMarkersProvider = Provider.autoDispose.family<List<ViewerMarker>, Str
 final sceneLabelsProvider = Provider.autoDispose.family<Map<String, String>, String>((ref, projectId) {
   final components = ref.watch(componentsProvider(projectId)).value ?? const [];
   return {for (final c in components) c.meshNodeId: shortComponentName(c)};
+});
+
+/// App-built 3D geometry of the hull blocks entered in Production "Blocks"
+/// (viewer command `set_procedural`); blocks with a GLB mesh keep the GLB mesh.
+final hullBlockGeometryProvider = Provider.autoDispose.family<List<Map<String, dynamic>>, String>((ref, projectId) {
+  final hulls = ref.watch(hullsProvider(projectId)).value ?? const [];
+  if (hulls.isEmpty) return const [];
+  final components = ref.watch(componentsProvider(projectId)).value ?? const [];
+  return [for (final n in HullBlockGeometry.build(hulls, components)) n.toJson()];
+});
+
+/// Camera views of the hulls that have blocks: (label, block mesh ids).
+final hullCameraViewsProvider = Provider.autoDispose.family<List<(String, List<String>)>, String>((ref, projectId) {
+  final hulls = [...ref.watch(hullsProvider(projectId)).value ?? const []]..sort((a, b) => a.hullNo.compareTo(b.hullNo));
+  final components = ref.watch(componentsProvider(projectId)).value ?? const [];
+  return [
+    for (final h in hulls)
+      if (blocksOfHull(components, h.hullNo) case final blocks when blocks.isNotEmpty)
+        (h.displayName, [for (final b in blocks) b.meshNodeId]),
+  ];
 });
 
 /// Nodes hidden by the category layer filter.

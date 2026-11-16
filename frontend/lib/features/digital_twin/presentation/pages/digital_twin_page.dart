@@ -98,6 +98,10 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
     ref.listenManual<Set<String>>(sceneHiddenProvider(_projectId), (_, next) {
       _viewer.setHidden(next);
     }, fireImmediately: true);
+    // Shipyard: hull blocks entered in the app are drawn by the viewer.
+    ref.listenManual<List<Map<String, dynamic>>>(hullBlockGeometryProvider(_projectId), (_, next) {
+      _viewer.setProcedural(next);
+    }, fireImmediately: true);
   }
 
   void _setBaseColorMode(ViewerColorMode mode) {
@@ -133,6 +137,8 @@ class _DigitalTwinPageState extends ConsumerState<DigitalTwinPage> {
           _viewerError = null;
           _meshNodesInModel = meshNodeIds;
         });
+      case SceneNodes(:final meshNodeIds):
+        setState(() => _meshNodesInModel = meshNodeIds);
       case ModelError(:final message):
         setState(() {
           _modelLoading = false;
