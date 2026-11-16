@@ -12,6 +12,7 @@ import '../../providers/shipyard_providers.dart';
 import '../scene_actions.dart';
 import 'activity_dialog.dart';
 import 'activity_form_dialog.dart';
+import 'blocks_dialog.dart';
 import 'draft_schedule_dialog.dart';
 import 'gantt_chart.dart';
 import 'hull_dialog.dart';
@@ -216,6 +217,27 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     );
   }
 
+  Future<void> _blocks(List<Hull> hulls) async {
+    final created = await BlocksDialog.show(
+      context,
+      projectId: widget.projectId,
+      hulls: hulls,
+      initialHullId: _hullFilter,
+    );
+    if (created == null || created == 0 || !mounted) return;
+    _snack('$created block${created == 1 ? '' : 's'} created. Plan their schedule next (Plan).');
+  }
+
+  Widget _blocksButton(List<Hull> hulls) => Padding(
+    padding: const EdgeInsets.only(left: 4),
+    child: OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+      onPressed: hulls.isEmpty ? null : () => _blocks(hulls),
+      icon: const Icon(Icons.view_module_outlined, size: 18),
+      label: const Text('Blocks'),
+    ),
+  );
+
   Widget _newHullButton(List<Hull> hulls, List<TwinComponent> components) => Padding(
     padding: const EdgeInsets.only(left: 4),
     child: FilledButton.tonalIcon(
@@ -254,6 +276,7 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _planMenu(hulls.value!, components, activities.value!),
+                    _blocksButton(hulls.value!),
                     _newHullButton(hulls.value!, components),
                   ],
                 ),
@@ -330,6 +353,7 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
               ),
               if (canEdit) ...[
                 _planMenu(hullList, components, activities.value!),
+                _blocksButton(hullList),
                 _newHullButton(hullList, components),
               ],
             ],

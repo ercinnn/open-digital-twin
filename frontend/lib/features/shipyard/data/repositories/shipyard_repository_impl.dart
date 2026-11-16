@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../domain/entities/block_entities.dart';
 import '../../domain/entities/hse_entities.dart';
 import '../../domain/entities/material_entities.dart';
 import '../../domain/entities/organization_entities.dart';
@@ -8,6 +9,7 @@ import '../../domain/entities/quality_entities.dart';
 import '../../domain/entities/resource_entities.dart';
 import '../../domain/repositories/shipyard_repository.dart';
 import '../../domain/services/yard_kpis.dart' show LatestReading;
+import '../models/block_models.dart';
 import '../models/json_utils.dart';
 import '../models/hse_models.dart';
 import '../models/material_models.dart';
@@ -87,6 +89,36 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
         .from('production_activities')
         .update(ProductionActivityModel.progressUpdate(activity))
         .eq('id', activity.id);
+  }
+
+  @override
+  Future<void> createBlocks(List<BlockDraft> drafts) async {
+    if (drafts.isEmpty) return;
+    try {
+      await supabase.from('components').insert([for (final d in drafts) BlockModel.insert(d)]);
+    } on PostgrestException catch (e) {
+      if (e.code == '23505') {
+        throw const ShipyardException(
+          'A block code (mesh id) already exists in this yard. Reload the block list and change the code.',
+        );
+      }
+      _rethrow(e);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
+  Future<void> deleteBlock(String componentId) async {
+    try {
+      final rows = await supabase.from('components').delete().eq('id', componentId).select('id');
+      // RLS hides the row from non-editors: nothing deleted, no error.
+      if (rows.isEmpty) throw const ShipyardException('Not deleted: sign in with an editor account and reload.');
+    } on ShipyardException {
+      rethrow;
+    } catch (e) {
+      _rethrow(e);
+    }
   }
 
   @override

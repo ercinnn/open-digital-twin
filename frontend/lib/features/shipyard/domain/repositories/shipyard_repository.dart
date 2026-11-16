@@ -1,3 +1,4 @@
+import '../entities/block_entities.dart';
 import '../entities/hse_entities.dart';
 import '../entities/material_entities.dart';
 import '../entities/organization_entities.dart';
@@ -25,6 +26,14 @@ abstract interface class ShipyardRepository {
 
   /// Updates the particulars, milestones, status and location of a hull (editors).
   Future<Hull> updateHull(String hullId, HullDraft draft);
+
+  /// Inserts the blocks of a hull as `components` rows in one request (all or
+  /// nothing). Throws [ShipyardException] e.g. when a block code is taken.
+  Future<void> createBlocks(List<BlockDraft> drafts);
+
+  /// Deletes a block; its schedule rows are deleted with it, bookings,
+  /// inspections, punch items and permits keep their row without the block.
+  Future<void> deleteBlock(String componentId);
 
   /// Realtime schedule rows of a project.
   Stream<List<ProductionActivity>> watchActivities(String projectId);
