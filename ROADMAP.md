@@ -41,6 +41,6 @@ Bir madde tamamlandığında buradan silinip ilgili açıklama `CLAUDE.md`'ye ta
   - [ ] Departman bazlı yazma yetkisi (ör. boya birimi yalnızca kendi alanını düzenler): `app_editors` + `department_id`, RLS politikalarında kullanım.
   - [ ] Rezervasyon durumlarının zamanla otomatik ilerlemesi (planned → in_progress → done) için pg_cron işi; şu an uygulama "etkin durumu" saate göre gösteriyor.
   - [ ] Blok yerleşimi için alan içi gerçek slot/koordinat bilgisi (şu an alanın uzun ekseni boyunca otomatik sıralanıyor).
-  - [ ] NB-1001'in modellenmemiş ambar blokları (y 108-170 arası) ve NB-1002 blok geometrileri.
+  - [ ] Uygulamadan gemi projesi kurma (demo tersane gemisiz başlıyor): bir hull için blok bölümlemesi (blok bileşenleri + Blender'sız 3D geometri), blok seviyesinde taslak takvim (`draft_schedule.dart` şu an yalnızca hull seviyesinde), kızak konumu (iki gemi tandem), suya indirilen geminin bloklarının kızaktan kalkması.
   - [ ] QR/RFID için kamera ile barkod okuma (mobil); şu an klavye-wedge okuyucu veya elle giriş.
   - [ ] Masaüstü/mobil görüntüleyicide tersane katmanlarının (pin, etiket) denenmesi.

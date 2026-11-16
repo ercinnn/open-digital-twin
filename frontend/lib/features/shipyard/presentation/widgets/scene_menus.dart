@@ -26,7 +26,7 @@ const cameraPresets = <CameraPreset>[
     'NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',
     'NODE_A10_BLOCK_BLASTING_PAINT_HALL',
   ]),
-  CameraPreset('Building berth · NB-1001', Icons.directions_boat_outlined, [
+  CameraPreset('Building berth', Icons.directions_boat_outlined, [
     'NODE_A16_BUILDING_BERTH',
     'NODE_CRN_GOLIATH_600T',
   ]),

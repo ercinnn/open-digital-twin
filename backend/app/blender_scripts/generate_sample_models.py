@@ -11,9 +11,9 @@ Outputs:
     villa_b04.glb         -> NODE_RC_COLUMN_S01, NODE_HEAT_PUMP_UNIT,
                              NODE_CONCEALED_PIPE_KITCHEN (+ CTX_* context meshes)
     demo_shipyard.glb     -> NODE_A01..NODE_A20 yard areas, NODE_CRN_* cranes,
-                             NODE_NB1001_BLOCK_* newbuild blocks modelled at their erected
-                             positions (+ CTX_* sea, ships,
-                             production-flow arrows)
+                             (+ CTX_* sea, ground, roads, laydown area,
+                             production-flow arrows). No ships: ship projects
+                             are created in the app.
 
 CTX_* objects may carry a `ctx_opacity` custom property (glTF extras) that the
 viewer uses instead of its default ghost opacity.
@@ -385,7 +385,7 @@ def build_villa(col: bpy.types.Collection) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Demo Shipyard - yard operations + NB-1001 production flow
+# Demo Shipyard - yard areas, cranes and production flow (no ships)
 # Coordinates: X east, Y north, Z up from yard ground level (metres, real scale).
 # Sea lies to the south and east; the waterline is at Z = -3.
 # Layout is a simplified, axis-aligned version of the reference layout plan
@@ -470,41 +470,6 @@ def _wing_crane(pb: PartBuilder, x: float, y: float, deck_z: float) -> PartBuild
     return pb
 
 
-def _ship(
-    col: bpy.types.Collection,
-    name: str,
-    x0: float,
-    x1: float,
-    y0: float,
-    y1: float,
-    keel_z: float,
-    depth: float,
-    bow: str = "Y+",
-) -> None:
-    """Context ship: parallel-body hull + bow wedge + aft superstructure and funnel (stern at the opposite end)."""
-    hull_mat = material("MAT_CTX_SHIP_HULL", (0.55, 0.16, 0.12), roughness=0.6)
-    house_mat = material("MAT_CTX_SHIP_HOUSE", (0.92, 0.92, 0.90), roughness=0.6)
-    beam, cx = x1 - x0, (x0 + x1) / 2
-    bow_len = beam * 0.9
-    hull = PartBuilder()
-    if bow == "Y+":
-        _slab(hull, x0, x1, y0, y1 - bow_len, keel_z, keel_z + depth)
-        hull.wedge((cx, y1 - bow_len), beam, bow_len, keel_z, keel_z + depth, "Y+")
-        stern_y = y0
-    else:
-        _slab(hull, x0, x1, y0 + bow_len, y1, keel_z, keel_z + depth)
-        hull.wedge((cx, y0 + bow_len), beam, bow_len, keel_z, keel_z + depth, "Y-")
-        stern_y = y1
-    hull.build(f"CTX_{name}_HULL", hull_mat, col, ctx_opacity=0.35)
-    sign = 1.0 if bow == "Y+" else -1.0
-    deck = keel_z + depth
-    house = PartBuilder()
-    house.box((cx, stern_y + sign * 14.0, deck + 9.0), (beam * 0.8, 18.0, 18.0))
-    house.box((cx, stern_y + sign * 14.0, deck + 19.0), (beam * 1.0, 10.0, 2.0))  # bridge wings
-    house.cylinder((cx, stern_y + sign * 4.0, deck + 12.0), 2.8, 24.0, segments=12)  # funnel
-    house.build(f"CTX_{name}_SUPERSTRUCTURE", house_mat, col, ctx_opacity=0.35)
-
-
 def _flow_line(
     col: bpy.types.Collection,
     node_id: str,
@@ -522,13 +487,15 @@ def _flow_line(
     pb.build(node_id, mat, col, ctx_opacity=0.75)
 
 
+BERTH_HEAD_Y = 410.0  # landward end of the building berth (room for two 160 m hulls in tandem)
+
+
 def build_shipyard(col: bpy.types.Collection) -> None:
     ground = material("MAT_CTX_YARD_GROUND", (0.40, 0.42, 0.45), roughness=0.95)
     sea = material("MAT_CTX_SEA", (0.06, 0.30, 0.55), roughness=0.2)
     road = material("MAT_CTX_ROAD", (0.16, 0.17, 0.19), roughness=0.95)
     flow_steel = material("MAT_CTX_FLOW_STEEL", (1.0, 0.50, 0.08), roughness=0.5)
     flow_outfit = material("MAT_CTX_FLOW_OUTFITTING", (0.10, 0.80, 0.90), roughness=0.5)
-    ghost_hull = material("MAT_CTX_NB1001_ENVELOPE", (0.70, 0.36, 0.30), roughness=0.6)
 
     cladding = material("MAT_HALL_CLADDING", (0.70, 0.74, 0.79), metallic=0.4, roughness=0.5)
     paint_hall = material("MAT_PAINT_HALL_CLADDING", (0.60, 0.70, 0.82), metallic=0.3, roughness=0.5)
@@ -538,7 +505,6 @@ def build_shipyard(col: bpy.types.Collection) -> None:
     dock_blue = material("MAT_FLOATING_DOCK", (0.16, 0.28, 0.55), metallic=0.5, roughness=0.5)
     crane_blue = material("MAT_CRANE_BLUE_RAL5005", (0.08, 0.30, 0.70), metallic=0.5, roughness=0.45)
     crane_yellow = material("MAT_CRANE_YELLOW_RAL1003", (0.95, 0.72, 0.08), metallic=0.4, roughness=0.45)
-    primer = material("MAT_BLOCK_SHOP_PRIMER", (0.56, 0.22, 0.16), metallic=0.5, roughness=0.6)
 
     # ---- Context: sea, land platform (with the dry-dock pit left open), roads ----
     _slab(PartBuilder(), -60, 960, -120, 680, SEA_Z - 0.4, SEA_Z).build("CTX_SEA", sea, col, ctx_opacity=0.55)
@@ -596,8 +562,6 @@ def build_shipyard(col: bpy.types.Collection) -> None:
     _slab(a09, 230, 520, 190, 310, 0, 0.25)
     for gx in range(5):
         for gy in range(3):
-            if gx == 1 and gy == 1:
-                continue  # space occupied by block SS-201
             x, y = 262 + gx * 55, 215 + gy * 38
             for dx in (-7, 7):
                 for dy in (-5, 5):
@@ -613,13 +577,13 @@ def build_shipyard(col: bpy.types.Collection) -> None:
 
     # ---- 16 Building berth (slipway) with Goliath crane rails ------------------
     a16 = PartBuilder()
-    _slab(a16, 50, 90, -40, 360, SEA_Z, 0.6)  # berth slab, runs into the sea for launching
+    _slab(a16, 50, 90, -40, BERTH_HEAD_Y, SEA_Z, 0.6)  # berth slab, runs into the sea for launching
     for x in (62.0, 78.0):
-        a16.box((x, 160, 0.9), (1.5, 400, 0.6))  # sliding ways
-    for i in range(37):
-        a16.box((70, 42 + i * 6, 1.3), (2.0, 1.5, 1.4))  # keel blocks
+        a16.box((x, (BERTH_HEAD_Y - 40) / 2, 0.9), (1.5, BERTH_HEAD_Y + 40, 0.6))  # sliding ways
+    for i in range(int((BERTH_HEAD_Y - 20 - 42) // 6) + 1):
+        a16.box((70, 42 + i * 6, 1.3), (2.0, 1.5, 1.4))  # keel blocks (both tandem positions)
     for x in (36.0, 104.0):
-        a16.box((x, 180, 0.4), (4.0, 360, 0.8))  # goliath crane rails
+        a16.box((x, BERTH_HEAD_Y / 2, 0.4), (4.0, BERTH_HEAD_Y, 0.8))  # goliath crane rails
     a16.build("NODE_A16_BUILDING_BERTH", concrete, col)
 
     # ---- 17 Dry dock (pit open to the south) + pump house ----------------------
@@ -634,7 +598,6 @@ def build_shipyard(col: bpy.types.Collection) -> None:
         a17.box((168, 40 + i * 12, floor_z + 0.7), (2.0, 1.5, 1.4))  # docking blocks
     _slab(a17, 198, 205, 330, 350, 0, 7)  # pump house
     a17.build("NODE_A17_DRY_DOCK", concrete, col)
-    _ship(col, "SHIP_IN_DRY_DOCK", 150, 186, 40, 300, floor_z + 1.4, 18.0, bow="Y+")
 
     # ---- 18 Floating dock (north-east, in the sea) ------------------------------
     a18 = PartBuilder()
@@ -645,7 +608,6 @@ def build_shipyard(col: bpy.types.Collection) -> None:
         for x in (842, 870):
             a18.box((x, y, 18), (3.0, 3.0, 8.0))  # wing-wall crane pedestals
     a18.build("NODE_A18_FLOATING_DOCK", dock_blue, col)
-    _ship(col, "SHIP_IN_FLOATING_DOCK", 848, 864, 492, 618, -1.0, 11.0, bow="Y+")
 
     # ---- 19 Outfitting quay (400 m) --------------------------------------------
     a19 = PartBuilder()
@@ -656,8 +618,6 @@ def build_shipyard(col: bpy.types.Collection) -> None:
     for x in (770.0, 790.0):
         a19.box((x, 240, 0.8), (1.0, 400, 0.4))  # crane rails
     a19.build("NODE_A19_OUTFITTING_QUAY", concrete, col)
-    _ship(col, "SHIP_AT_QUAY_01", 808, 838, 60, 240, -9.0, 16.0, bow="Y-")
-    _ship(col, "SHIP_AT_QUAY_02", 806, 832, 265, 425, -8.0, 14.0, bow="Y+")
 
     # ---- 20 Management, engineering & support (HSE, canteen, gas/transformer) ---
     a20 = PartBuilder()
@@ -676,78 +636,6 @@ def build_shipyard(col: bpy.types.Collection) -> None:
     _jib_crane(PartBuilder(), 780, 330).build("NODE_CRN_QUAY_JIB_50T_02", crane_yellow, col)
     _jib_crane(PartBuilder(), 780, 415, boom_length=36.0).build("NODE_CRN_QUAY_LUFFING_28T", crane_yellow, col)
     _wing_crane(PartBuilder(), 842, 560, 14.0).build("NODE_CRN_FLOATING_DOCK_WING_25T", crane_yellow, col)
-
-    # ---- Newbuild NB-1001 on the building berth (stern toward the sea) --------
-    # Every block is modelled at its ERECTED position inside the hull. The viewer
-    # moves blocks that are still in production to the yard area recorded in
-    # public.production_activities (or hides them before fabrication starts).
-    keel = 2.0
-    hull_x0, hull_x1 = 54.0, 86.0
-    body_end = 170.0
-    envelope = PartBuilder()
-    _slab(envelope, hull_x0, hull_x1, 36, body_end, keel, keel + 22.0)
-    envelope.wedge((70, body_end), hull_x1 - hull_x0, 26.0, keel, keel + 22.0, "Y+")
-    envelope.build("CTX_NB1001_HULL_ENVELOPE", ghost_hull, col, ctx_opacity=0.12)
-
-    def double_bottom(y0: float, y1: float) -> PartBuilder:
-        pb = PartBuilder()
-        _slab(pb, hull_x0, hull_x1, y0, y1, keel, keel + 0.3)  # bottom shell
-        _slab(pb, hull_x0 + 1, hull_x1 - 1, y0, y1, keel + 2.4, keel + 2.7)  # inner bottom
-        for y in [y0 + 0.5 + i * 3.0 for i in range(int((y1 - y0) // 3.0))]:
-            pb.box((70, y, keel + 1.35), (hull_x1 - hull_x0 - 2, 0.2, 2.4))  # floors
-        for x in (58.0, 64.0, 70.0, 76.0, 82.0):
-            pb.box((x, (y0 + y1) / 2, keel + 1.35), (0.2, y1 - y0, 2.4))  # girders
-        return pb
-
-    double_bottom(36, 60).build("NODE_NB1001_BLOCK_DB_101", primer, col)
-    double_bottom(60, 84).build("NODE_NB1001_BLOCK_DB_102", primer, col)
-    double_bottom(84, 108).build("NODE_NB1001_BLOCK_DB_103", primer, col)
-
-    base = keel + 2.7
-    er = PartBuilder()  # engine-room block erected on top of DB-101
-    for x in (hull_x0 + 0.5, hull_x1 - 0.5):
-        er.box((x, 48, base + 7.0), (1.0, 24.0, 14.0))  # side shell + frames
-    er.box((70, 59.5, base + 7.0), (hull_x1 - hull_x0, 1.0, 14.0))  # forward ER bulkhead
-    er.box((70, 48, base + 9.0), (hull_x1 - hull_x0, 24.0, 0.4))  # 2nd deck (partial flat)
-    er.box((70, 48, base + 1.0), (8.0, 14.0, 2.0))  # main engine seating
-    er.build("NODE_NB1001_BLOCK_ER_301", primer, col)
-
-    def side_shell(x_shell: float, inward: float) -> PartBuilder:
-        """Cargo-hold side-shell block (y 60..108): shell, hopper flat, web frames, stringer."""
-        pb = PartBuilder()
-        pb.box((x_shell, 84.0, base + 6.5), (1.0, 48.0, 13.0))  # shell plating
-        pb.box((x_shell + inward * 6.0, 84.0, base + 0.3), (11.0, 48.0, 0.6))  # hopper / bottom flat
-        for y in [61.0 + i * 4.0 for i in range(12)]:
-            pb.box((x_shell + inward * 2.5, y, base + 6.5), (4.0, 0.3, 13.0))  # web frames
-        pb.box((x_shell + inward * 2.5, 84.0, base + 9.0), (4.0, 48.0, 0.4))  # side stringer
-        return pb
-
-    side_shell(hull_x0 + 0.5, 1.0).build("NODE_NB1001_BLOCK_SS_201", primer, col)  # port (bow = +Y)
-    side_shell(hull_x1 - 0.5, -1.0).build("NODE_NB1001_BLOCK_SS_202", primer, col)  # starboard
-
-    dk = PartBuilder()  # main-deck block with cargo hatch coaming
-    deck_z = base + 13.2
-    dk.box((70, 84, deck_z), (hull_x1 - hull_x0, 48.0, 0.4))  # deck plating
-    for y in [62.0 + i * 4.0 for i in range(12)]:
-        dk.box((70, y, deck_z - 0.6), (hull_x1 - hull_x0 - 2, 0.25, 0.8))  # deck beams
-    for x in (60.0, 80.0):
-        dk.box((x, 84, deck_z + 1.1), (0.5, 30.0, 1.8))  # hatch side coamings
-    for y in (69.0, 99.0):
-        dk.box((70, y, deck_z + 1.1), (20.5, 0.5, 1.8))  # hatch end coamings
-    dk.build("NODE_NB1001_BLOCK_DK_401", primer, col)
-
-    acc = PartBuilder()  # accommodation / superstructure block on top of the engine room
-    top = base + 14.0
-    acc.box((70, 47, top + 2.0), (24.0, 18.0, 4.0))  # A-deck
-    acc.box((70, 47, top + 6.0), (20.0, 15.0, 4.0))  # B-deck
-    acc.box((70, 51, top + 9.5), (30.0, 7.0, 3.0))  # wheelhouse with bridge wings
-    acc.cylinder((70, 39, top + 9.0), 2.2, 10.0, segments=12)  # funnel casing
-    acc.build("NODE_NB1001_BLOCK_ACC_601", primer, col)
-
-    bow = PartBuilder()  # bow block (forepeak) at the stem
-    bow.wedge((70.0, body_end), hull_x1 - hull_x0, 26.0, keel, keel + 18.0, "Y+")
-    bow.box((70.0, body_end + 0.5, keel + 9.0), (hull_x1 - hull_x0, 1.0, 18.0))  # collision bulkhead
-    bow.build("NODE_NB1001_BLOCK_BOW_501", primer, col)
 
     # ---- Production flow arrows (context) -------------------------------------
     z = 58.0

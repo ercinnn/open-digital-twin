@@ -2,13 +2,11 @@
 
 Open-source digital twin for ships / shipyards and buildings. CAD (`.step` `.ifc` `.ocx` `.obj` `.stl`) -> Python BOM + Headless Blender `.glb` -> Supabase (data, storage, realtime) -> Flutter app with an embedded Three.js viewer.
 
-## 1. Next task (do this first)
-**Step 6 - show NB-1004 block by block in 3D** (steps 1-5c, all done in the app: add/edit hull, schedule, stock, inspections, permits).
-- Model `NODE_NB1004_BLOCK_*` meshes in `backend/app/blender_scripts/generate_sample_models.py` (at their ERECTED position) and add them as `components` in `supabase/seed.sql`.
-- Move NB-1004 itself (hull, schedule rows) into `seed.sql`: rows created in the app are deleted by `reset_demo_data`.
-- Use block-level schedule rows (`component_id` = block) so `set_placements` moves the blocks; the app's draft schedule is hull-level only.
-- Solve the berth clash: NB-1001 stays at its erected position on the berth forever (also after launching), NB-1004 would overlap.
-- Then: backend test (every seeded `NODE_*` exists), regenerate GLBs, `scripts.publish_sample_assets`, `scripts.reset_demo_data --publish`.
+## 1. Status
+The demo shipyard (project 3) starts EMPTY of ships: no hulls, blocks, schedule, ship bookings, inspections, punch items, permits or trace events; no ships in the GLB (`CTX_SHIP_*` removed). Kept: 20 yard areas, 6 cranes, organization / shifts / assignments, HSE zones and incidents, 2 crane maintenance bookings, general stock (nothing reserved).
+- Goal: build a ship project step by step IN THE APP; add the missing app features one step at a time. Step 1 (exists): Production "New hull". Missing: block breakdown of a hull (block components + 3D geometry without Blender, the backend is not hosted), block-level draft schedule, then bookings / stock / ITP / permits on the blocks (exist).
+- Building berth y -40..410 (room for two 160 m hulls in tandem); the former Blender hull block geometry (9 blocks of a 160 m bulk carrier, `NODE_NB1001_BLOCK_*`) is only in the git history of `generate_sample_models.py` (commit b472c40).
+- Before `reset_demo_data`, move data entered in the app into `seed.sql` or it is lost.
 
 ## 2. Stack
 - Frontend: Flutter (Web + Windows primary) + `flutter_riverpod` 3.x + `supabase_flutter`. Feature-first clean architecture (`data` / `domain` / `presentation`); complete files, no TODOs.
@@ -25,7 +23,7 @@ Open-source digital twin for ships / shipyards and buildings. CAD (`.step` `.ifc
 - **DB names:** English `snake_case` for tables, columns, RPCs, buckets.
 - **Mesh ids:** every GLB node keeps its `mesh_node_id` = `components.mesh_node_id`; format `NODE_<UPPER_SNAKE>` (<= 60 chars, `cad_parser.sanitize_node_id`), stored as node name and `extras.mesh_node_id`. Ingest fails (HTTP 500) if a BOM id is missing in the GLB.
 - **Context geometry** `CTX_*`: not in the BOM, ghosted and not pickable (`extras.ctx_opacity` 0..1, default 0.16, >= 0.99 opaque).
-- **Hull blocks** `NODE_<HULL>_BLOCK_*` are modelled at their erected position; the viewer moves them to the area of their running / last schedule row, ghosts them during cutting / bending / panel and hides them before the first activity.
+- **Hull blocks** `NODE_<HULL>_BLOCK_*` are modelled at their erected position; the viewer moves them to the area of their running / last schedule row, ghosts them during cutting / bending / panel and hides them before the first activity. Only block-level schedule rows (`component_id` = block) move blocks; the app's draft schedule is hull-level.
 - **Secrets:** `SUPABASE_SERVICE_ROLE_KEY` only in the root `.env`. `frontend/.env` is bundled into the app: public values only. Never commit either.
 - **Access:** `anon` / `authenticated` read only. Writes need an editor (row in `public.app_editors`, RPC `is_editor()`); the UI shows write controls only if `isEditorProvider`. Add one: `insert into public.app_editors (user_id) select id from auth.users where email = '<email>';`
 - **Backend auth:** all endpoints except `/health` need `Authorization: Bearer <editor access token>` (`app/auth.py`). `AUTH_REQUIRED=false` only for local experiments.
@@ -39,7 +37,7 @@ Open-source digital twin for ships / shipyards and buildings. CAD (`.step` `.ifc
 4. Sensor simulation runs in the DB (migration 004): pg_cron `odt_simulate_telemetry` (1/min, thresholds from `metric_profiles`), `odt_telemetry_retention` (4 days), `odt_cron_history_cleanup`. Button = RPC `simulate_telemetry` (editors); "Live" stops after 10 min. `metric_profiles` MUST mirror `telemetry_simulator.PROFILES` (backend test) - change both in a new migration.
 
 ## 5. Shipyard module (migrations 005-011, demo project 3)
-- Shown for projects with rows in `hulls`. Tables use `_odt_secure_table()` (public read, editor write); realtime on `production_activities`, `resource_bookings`, `punch_items`, `work_permits`.
+- Shown for projects with rows in `hulls` or `departments` (`shipyardEnabledProvider`), so an empty yard can create its first hull. Tables use `_odt_secure_table()` (public read, editor write); realtime on `production_activities`, `resource_bookings`, `punch_items`, `work_permits`.
 - DB rules: booking overlap per (resource, slot) = exclusion constraint (23P01); load > `metadata.swl_t` / `lifting_capacity_t` rejected; crane `alert` suspends / resumes its bookings; hot work / confined space need O2 19.5-23.5 % and LEL < 10 % to become `active`; inspections with a measured value get pass / fail from the acceptance band.
 - Editors can create / edit in the app: hulls (Production "New hull", Dashboard card tap), schedule rows (Production "Plan": draft from milestones, add, edit plan, delete), stock items (Materials "New item", tap to edit), inspections (Quality "Plan": single or ITP draft from the schedule; record result, delete), permits (HSE "Request permit", then approve / activate).
 - Pure Dart logic in `features/shipyard/domain/services/` (placements, Gantt, KPIs, `draft_schedule.dart`, `inspection_plan.dart`) and draft classes with `validationErrors()` in `domain/entities/`, all unit tested.

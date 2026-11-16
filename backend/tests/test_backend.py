@@ -103,7 +103,7 @@ def test_database_metric_profiles_match_python_profiles() -> None:
 
 def test_seed_categories_have_sensor_profiles() -> None:
     rows = _seed_component_rows()
-    assert len(rows) >= 36
+    assert len(rows) >= 33
     missing = {m["category"] for m in rows} - set(PROFILES)
     assert not missing, f"Seed categories without a telemetry profile: {sorted(missing)}"
 
@@ -141,7 +141,7 @@ def test_sample_models_satisfy_mapping_contract() -> None:
         "villa_b04.glb": {"NODE_RC_COLUMN_S01", "NODE_HEAT_PUMP_UNIT", "NODE_CONCEALED_PIPE_KITCHEN"},
         "demo_shipyard.glb": set(_seed_mesh_node_ids("33333333-3333-3333-3333-333333333333")),
     }
-    assert len(expected["demo_shipyard.glb"]) == 35
+    assert len(expected["demo_shipyard.glb"]) == 26  # 20 yard areas + 6 cranes, no ships
     for filename, nodes in expected.items():
         path = SAMPLE_MODELS_DIR / filename
         if not path.exists():

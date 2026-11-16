@@ -26,9 +26,13 @@ final hullsProvider = FutureProvider.autoDispose.family<List<Hull>, String>((ref
   return ref.watch(shipyardRepositoryProvider).fetchHulls(projectId);
 });
 
-/// The operations dock is shown for projects that have shipyard data.
+/// The operations dock is shown for projects that have shipyard data: hulls or a
+/// yard organization (departments). A yard without any hull keeps the dock, so
+/// the first hull can be created from the Production tab.
 final shipyardEnabledProvider = Provider.autoDispose.family<bool, String>((ref, projectId) {
-  return ref.watch(hullsProvider(projectId)).value?.isNotEmpty ?? false;
+  final hasHulls = ref.watch(hullsProvider(projectId)).value?.isNotEmpty ?? false;
+  final hasOrganization = !(ref.watch(organizationProvider(projectId)).value?.isEmpty ?? true);
+  return hasHulls || hasOrganization;
 });
 
 final activitiesProvider = StreamProvider.autoDispose.family<List<ProductionActivity>, String>((ref, projectId) {
