@@ -83,6 +83,110 @@ class WorkPermit {
   Duration remaining(DateTime now) => validTo.difference(now);
 }
 
+/// Standard precautions proposed for a new permit (editable).
+const permitPrecautions = <PermitType, String>{
+  PermitType.hotWork: 'Fire watch, extinguisher, remove combustibles, gas test every 2 h',
+  PermitType.confinedSpace: 'Forced ventilation, standby attendant, rescue tripod, continuous gas monitor',
+  PermitType.workAtHeight: 'Scaffold tag green, harness 100 % tie-off, tool lanyards',
+  PermitType.lifting: 'Approved lift plan, exclusion zone, wind below crane limit',
+  PermitType.electricalIsolation: 'LOTO applied, test before touch, isolation certificate',
+  PermitType.painting: 'No ignition sources, extraction fans running, LEL monitor',
+};
+
+/// A permit-to-work requested by an editor (insert into `work_permits`, status `requested`).
+/// Approval and activation (with the gas test) follow in [WorkPermit] details.
+class PermitDraft {
+  const PermitDraft({
+    required this.projectId,
+    required this.componentId,
+    required this.permitNo,
+    required this.type,
+    required this.description,
+    required this.validFrom,
+    required this.validTo,
+    this.hullId,
+    this.issuedTo,
+    this.precautions,
+  });
+
+  final String projectId;
+
+  /// Block or yard area the work takes place at (required by the table).
+  final String? componentId;
+  final String? hullId;
+  final String permitNo;
+  final PermitType type;
+  final String description;
+  final DateTime validFrom;
+  final DateTime validTo;
+
+  /// Crew / contractor (no personal names in the demo).
+  final String? issuedTo;
+  final String? precautions;
+
+  /// Longest validity of one permit; longer work is split into shifts.
+  static const maxValidity = Duration(hours: 24);
+
+  /// Human-readable problems; empty when the draft can be saved.
+  List<String> validationErrors() => [
+    if (componentId == null) 'Choose the block or area where the work takes place.',
+    if (description.trim().isEmpty) 'Describe the work.',
+    if (permitNo.trim().isEmpty) 'The permit number is missing.',
+    if (!validTo.isAfter(validFrom)) 'The permit must end after it starts.',
+    if (validTo.difference(validFrom) > maxValidity) 'A permit may be valid for at most 24 hours (one per shift / day).',
+  ];
+}
+
+/// Next permit number in the seed style `PTW-<yymm>-<3 digits>` (`PTW-2611-109`).
+String nextPermitNumber(Iterable<String> existing, DateTime now) {
+  String two(int v) => v.toString().padLeft(2, '0');
+  final prefix = 'PTW-${two(now.year % 100)}${two(now.month)}-';
+  var max = 100;
+  for (final no in existing) {
+    final n = no.trim().toUpperCase();
+    if (!n.startsWith(prefix)) continue;
+    final v = int.tryParse(n.substring(prefix.length));
+    if (v != null && v > max) max = v;
+  }
+  return '$prefix${max + 1}';
+}
+
+/// A hazard zone at the permit location, and whether it conflicts with the work.
+class ZoneWarning {
+  const ZoneWarning(this.zone, {required this.conflict, required this.message});
+
+  final HseZone zone;
+  final bool conflict;
+  final String message;
+}
+
+/// Active zones at [componentId] that matter for a permit of [type]. Conflicts
+/// (e.g. hot work in a solvent atmosphere) are listed first.
+List<ZoneWarning> permitZoneWarnings(PermitType type, String? componentId, List<HseZone> zones) {
+  if (componentId == null) return const [];
+  final warnings = <ZoneWarning>[];
+  for (final z in zones.where((z) => z.active && z.componentId == componentId)) {
+    final (conflict, message) = switch ((type, z.type)) {
+      (PermitType.hotWork, ZoneType.hazardousAtmosphere) => (
+        true,
+        'Hot work inside a hazardous atmosphere zone: gas-free certificate and stopped coating work required.',
+      ),
+      (PermitType.hotWork || PermitType.painting, ZoneType.confinedSpace) => (
+        true,
+        'Confined space: a separate confined space permit with attendant is also required.',
+      ),
+      (PermitType.workAtHeight || PermitType.lifting, ZoneType.overheadLifting) => (
+        false,
+        'Overhead lifting zone: coordinate with the crane operator, keep out of the load path.',
+      ),
+      _ => (false, z.description ?? z.type.label),
+    };
+    warnings.add(ZoneWarning(z, conflict: conflict, message: message));
+  }
+  warnings.sort((a, b) => (b.conflict ? 1 : 0) - (a.conflict ? 1 : 0));
+  return warnings;
+}
+
 enum ZoneType {
   restricted('restricted', 'Restricted', '#ef4444'),
   hazardousAtmosphere('hazardous_atmosphere', 'Hazardous atmosphere', '#f97316'),

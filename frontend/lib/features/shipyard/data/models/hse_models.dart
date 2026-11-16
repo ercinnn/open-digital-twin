@@ -22,6 +22,27 @@ class WorkPermitModel {
     precautions: json['precautions'] as String?,
     position: readMarker(json),
   );
+
+  /// Row for `insert into work_permits` (status `requested`, pin on top of the component).
+  static Map<String, dynamic> insert(PermitDraft d) {
+    String? text(String? v) => v == null || v.trim().isEmpty ? null : v.trim();
+    return {
+      'project_id': d.projectId,
+      'component_id': d.componentId,
+      'hull_id': d.hullId,
+      'permit_no': d.permitNo.trim().toUpperCase(),
+      'permit_type': d.type.dbValue,
+      'description': d.description.trim(),
+      'status': PermitStatus.requested.dbValue,
+      'valid_from': writeTimestamp(d.validFrom),
+      'valid_to': writeTimestamp(d.validTo),
+      'issued_to': text(d.issuedTo),
+      'precautions': text(d.precautions),
+      'marker_u': 0.5,
+      'marker_v': 0.5,
+      'marker_w': 1,
+    };
+  }
 }
 
 class HseZoneModel {

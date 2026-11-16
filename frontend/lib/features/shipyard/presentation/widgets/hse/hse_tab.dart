@@ -12,6 +12,7 @@ import '../../providers/scene_view_providers.dart';
 import '../../providers/shipyard_providers.dart';
 import '../scene_actions.dart';
 import 'hse_dialogs.dart';
+import 'new_permit_dialog.dart';
 
 /// Work permits, hazard zones and incidents with their 3D layers.
 class HseTab extends ConsumerWidget {
@@ -32,6 +33,7 @@ class HseTab extends ConsumerWidget {
     final now = ref.watch(nowProvider).value ?? DateTime.now();
     final canEdit = ref.watch(isEditorProvider);
     final selected = ref.watch(selectedComponentProvider(projectId));
+    final hulls = ref.watch(hullsProvider(projectId)).value ?? const <Hull>[];
 
     if (permits.hasError) return ErrorView(error: permits.error!);
     if (!permits.hasValue) return const LoadingView();
@@ -66,24 +68,53 @@ class HseTab extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
           child: Row(
             children: [
-              kpi('days without lost-time injury', summary.daysSinceLostTime?.toString() ?? '—', const Color(0xFF22C55E)),
-              kpi('live permits', '${summary.livePermits}', const Color(0xFFF97316)),
-              kpi('open incidents', '${summary.openIncidents}', const Color(0xFFEF4444)),
-              kpi('near misses (30 d)', '${summary.nearMisses30d}', const Color(0xFFFACC15)),
-              const Spacer(),
-              Wrap(
-                spacing: 6,
-                children: [
-                  FilterChip(label: const Text('Pins'), selected: view.hsePins, onSelected: notifier.setHsePins),
-                  FilterChip(label: const Text('Blink permit areas'), selected: view.permitBlink, onSelected: notifier.setPermitBlink),
-                  FilterChip(
-                    label: const Text('Zones overlay'),
-                    selected: view.overlay == SceneOverlay.hseZones,
-                    onSelected: (v) => notifier.setOverlay(v ? SceneOverlay.hseZones : null),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      kpi('days without lost-time injury', summary.daysSinceLostTime?.toString() ?? '—', const Color(0xFF22C55E)),
+                      kpi('live permits', '${summary.livePermits}', const Color(0xFFF97316)),
+                      kpi('open incidents', '${summary.openIncidents}', const Color(0xFFEF4444)),
+                      kpi('near misses (30 d)', '${summary.nearMisses30d}', const Color(0xFFFACC15)),
+                      const SizedBox(width: 8),
+                      FilterChip(label: const Text('Pins'), selected: view.hsePins, onSelected: notifier.setHsePins),
+                      const SizedBox(width: 6),
+                      FilterChip(label: const Text('Blink permit areas'), selected: view.permitBlink, onSelected: notifier.setPermitBlink),
+                      const SizedBox(width: 6),
+                      FilterChip(
+                        label: const Text('Zones overlay'),
+                        selected: view.overlay == SceneOverlay.hseZones,
+                        onSelected: (v) => notifier.setOverlay(v ? SceneOverlay.hseZones : null),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
               const SizedBox(width: 8),
+              if (canEdit) ...[
+                FilledButton.icon(
+                  onPressed: () async {
+                    final saved = await NewPermitDialog.show(
+                      context,
+                      projectId: projectId,
+                      hulls: hulls,
+                      components: components,
+                      zones: zones,
+                      existing: permits.value!,
+                      initialComponentId: selected?.id,
+                    );
+                    if (saved == true && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Permit requested. Tap it to approve and activate it.')),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.assignment_add, size: 18),
+                  label: const Text('Request permit'),
+                ),
+                const SizedBox(width: 6),
+              ],
               FilledButton.tonalIcon(
                 onPressed: canEdit
                     ? () => showDialog<void>(

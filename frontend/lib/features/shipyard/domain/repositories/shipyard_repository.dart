@@ -111,6 +111,10 @@ abstract interface class ShipyardRepository {
 
   Future<List<HseZone>> fetchZones(String projectId);
 
+  /// Requests a permit-to-work (status `requested`). Throws [ShipyardException]
+  /// when the permit number is taken.
+  Future<void> createPermit(PermitDraft draft);
+
   Future<List<HseIncident>> fetchIncidents(String projectId);
 
   /// Throws [ShipyardException] when a hot work / confined space permit is

@@ -379,6 +379,20 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
   }
 
   @override
+  Future<void> createPermit(PermitDraft draft) async {
+    try {
+      await supabase.from('work_permits').insert(WorkPermitModel.insert(draft));
+    } on PostgrestException catch (e) {
+      if (e.code == '23505') {
+        throw ShipyardException('Permit number ${draft.permitNo} was just taken - close and open the form again.');
+      }
+      _rethrow(e);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
   Future<void> setPermitStatus(String permitId, PermitStatus status, {double? gasO2, double? gasLel}) async {
     try {
       await supabase
