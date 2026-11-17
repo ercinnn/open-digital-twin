@@ -7,15 +7,10 @@ import '../../../../digital_twin/domain/entities/twin_entities.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/entities/resource_entities.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
+import '../../../domain/services/lift_plan.dart';
 import '../../providers/shipyard_providers.dart';
 
-double? resourceCapacity(TwinComponent c) {
-  for (final key in ['swl_t', 'lifting_capacity_t']) {
-    final v = c.metadata[key];
-    if (v is num) return v.toDouble();
-  }
-  return null;
-}
+double? resourceCapacity(TwinComponent c) => resourceCapacityT(c);
 
 /// Details of a booking; editors can confirm, finish or cancel it.
 class BookingDetailsDialog extends ConsumerStatefulWidget {

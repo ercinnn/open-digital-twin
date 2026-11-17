@@ -15,6 +15,7 @@ import '../../../domain/entities/resource_entities.dart';
 import '../../providers/shipyard_providers.dart';
 import '../scene_actions.dart';
 import 'booking_dialogs.dart';
+import 'lift_plan_dialog.dart';
 
 const _resourceCategories = ['crane', 'docks_and_berths', 'floating_dock', 'outfitting_quay'];
 
@@ -51,6 +52,34 @@ class _ResourcesTabState extends ConsumerState<ResourcesTab> {
         initialResourceId: resourceId,
       ),
     );
+  }
+
+  Future<void> _planLifts(List<Hull> hulls, List<TwinComponent> components, List<ResourceBooking> bookings) async {
+    final activities = ref.read(activitiesProvider(widget.projectId)).value ?? const <ProductionActivity>[];
+    final first = await LiftPlanDialog.show(
+      context,
+      hulls: hulls,
+      activities: activities,
+      components: components,
+      bookings: bookings,
+    );
+    if (first == null || !mounted) return;
+    setState(() => _from = addDays(dateOnly(first), -1));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Erection lifts booked as "Planned". Tap a lift to confirm or cancel it.')),
+    );
+  }
+
+  Future<void> _pickWeek() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: addDays(_from, 2),
+      firstDate: DateTime(now.year - 2),
+      lastDate: DateTime(now.year + 6),
+      helpText: 'Show the calendar from',
+    );
+    if (date != null && mounted) setState(() => _from = addDays(date, -1));
   }
 
   @override
@@ -103,7 +132,24 @@ class _ResourcesTabState extends ConsumerState<ResourcesTab> {
                 onPressed: () => setState(() => _from = addDays(_from, 7)),
                 icon: const Icon(Icons.chevron_right),
               ),
-              Text('${formatDate(_from)} – ${formatDate(addDays(_to, -1))}', style: const TextStyle(fontSize: 12.5)),
+              Tooltip(
+                message: 'Go to a date',
+                child: InkWell(
+                  onTap: _pickWeek,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('${formatDate(_from)} – ${formatDate(addDays(_to, -1))}', style: const TextStyle(fontSize: 12.5)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.calendar_month_outlined, size: 16, color: AppTheme.textMuted),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(width: 12),
               SegmentedButton<_ResourceFilter>(
                 showSelectedIcon: false,
@@ -124,6 +170,15 @@ class _ResourcesTabState extends ConsumerState<ResourcesTab> {
                     visualDensity: VisualDensity.compact,
                     avatar: const Icon(Icons.air, size: 16, color: Color(0xFFFDBA74)),
                     label: Text('$suspended suspended (crane alarm)', style: const TextStyle(fontSize: 11.5)),
+                  ),
+                ),
+              if (canEdit)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: OutlinedButton.icon(
+                    onPressed: () => _planLifts(hulls, components, bookings.value!),
+                    icon: const Icon(Icons.precision_manufacturing_outlined, size: 18),
+                    label: const Text('Plan block lifts'),
                   ),
                 ),
               Tooltip(

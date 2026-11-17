@@ -25,6 +25,7 @@ class ResourceBookingModel {
     'project_id': d.projectId,
     'component_id': d.componentId,
     'hull_id': d.hullId,
+    'activity_id': d.activityId,
     'title': d.title,
     'booking_type': d.type.dbValue,
     'slot': d.slot,
@@ -32,6 +33,6 @@ class ResourceBookingModel {
     'ends_at': writeTimestamp(d.endsAt),
     'load_t': d.loadT,
     'notes': d.notes,
-    'status': 'confirmed',
+    'status': d.status.dbValue,
   };
 }

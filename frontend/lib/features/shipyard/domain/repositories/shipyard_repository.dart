@@ -59,6 +59,9 @@ abstract interface class ShipyardRepository {
   /// Throws [ShipyardException] on double booking or capacity violations.
   Future<void> createBooking(BookingDraft draft);
 
+  /// Inserts all bookings or none (one statement).
+  Future<void> createBookings(List<BookingDraft> drafts);
+
   Future<void> setBookingStatus(String bookingId, BookingStatus status);
 
   // ---- Materials (008) --------------------------------------------------------

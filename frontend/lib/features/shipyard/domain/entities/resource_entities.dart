@@ -95,13 +95,21 @@ class BookingDraft {
     required this.startsAt,
     required this.endsAt,
     this.hullId,
+    this.activityId,
     this.loadT,
     this.notes,
+    this.status = BookingStatus.confirmed,
   });
 
   final String projectId;
   final String componentId;
   final String? hullId;
+
+  /// Schedule row the booking serves (e.g. the erection of a block).
+  final String? activityId;
+
+  /// Bookings entered by hand are confirmed; generated plans start as planned.
+  final BookingStatus status;
   final String title;
   final BookingType type;
   final int slot;

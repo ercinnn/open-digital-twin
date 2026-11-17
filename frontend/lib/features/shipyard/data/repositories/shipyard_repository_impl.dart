@@ -188,6 +188,16 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
   }
 
   @override
+  Future<void> createBookings(List<BookingDraft> drafts) async {
+    if (drafts.isEmpty) return;
+    try {
+      await supabase.from('resource_bookings').insert([for (final d in drafts) ResourceBookingModel.insert(d)]);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
   Future<void> setBookingStatus(String bookingId, BookingStatus status) async {
     try {
       await supabase
