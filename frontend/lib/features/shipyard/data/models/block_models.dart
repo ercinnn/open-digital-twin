@@ -24,4 +24,10 @@ class BlockModel {
       'stage': 'Not started',
     },
   };
+
+  /// Editable fields of an existing block (code, type and side stay).
+  static Map<String, dynamic> edit({required String name, required double? weightKg}) => {
+    'name': name.trim(),
+    'weight_kg': weightKg,
+  };
 }

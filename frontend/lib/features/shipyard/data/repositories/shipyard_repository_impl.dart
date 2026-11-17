@@ -109,6 +109,23 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
   }
 
   @override
+  Future<void> updateBlock(String componentId, {required String name, required double? weightKg}) async {
+    try {
+      final rows = await supabase
+          .from('components')
+          .update(BlockModel.edit(name: name, weightKg: weightKg))
+          .eq('id', componentId)
+          .select('id');
+      // RLS hides the row from non-editors: nothing updated, no error.
+      if (rows.isEmpty) throw const ShipyardException('Not saved: sign in with an editor account and reload.');
+    } on ShipyardException {
+      rethrow;
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
   Future<void> deleteBlock(String componentId) async {
     try {
       final rows = await supabase.from('components').delete().eq('id', componentId).select('id');
@@ -204,6 +221,37 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
           .from('resource_bookings')
           .update({'status': status.dbValue, if (status != BookingStatus.suspended) 'suspended_reason': null})
           .eq('id', bookingId);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
+  Future<void> updateBookingPlan(
+    String bookingId, {
+    required String componentId,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    required double? loadT,
+    required String? notes,
+  }) async {
+    try {
+      final rows = await supabase
+          .from('resource_bookings')
+          .update(
+            ResourceBookingModel.planUpdate(
+              componentId: componentId,
+              startsAt: startsAt,
+              endsAt: endsAt,
+              loadT: loadT,
+              notes: notes,
+            ),
+          )
+          .eq('id', bookingId)
+          .select('id');
+      if (rows.isEmpty) throw const ShipyardException('Booking not saved: sign in with an editor account and reload.');
+    } on ShipyardException {
+      rethrow;
     } catch (e) {
       _rethrow(e);
     }

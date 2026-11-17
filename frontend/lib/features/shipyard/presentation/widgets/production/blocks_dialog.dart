@@ -9,12 +9,15 @@ import '../../../domain/entities/block_entities.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
 import '../../../domain/services/block_breakdown.dart';
+import '../../../domain/services/lift_plan.dart';
 import '../../providers/shipyard_providers.dart';
 
-/// Block list of a hull: shows the existing blocks (delete) and adds new ones
-/// from the block type catalogue. The user enters how many blocks of each type
-/// (port / starboard separately for sided types); default codes and names are
-/// generated and can be changed before saving. Returns the number of created blocks.
+/// Block list of a hull: shows the existing blocks (delete; edit names and
+/// weights) and adds new ones from the block type catalogue. The user enters
+/// how many blocks of each type (port / starboard separately for sided types);
+/// default codes and names are generated and can be changed before saving.
+/// Saved weights are carried into the hull's `planned` erection lifts
+/// ([LiftPlan.syncLoads]: load, lift window, crane). Returns a summary for a snack bar.
 class BlocksDialog extends ConsumerStatefulWidget {
   const BlocksDialog({super.key, required this.projectId, required this.hulls, this.initialHullId});
 
@@ -22,13 +25,13 @@ class BlocksDialog extends ConsumerStatefulWidget {
   final List<Hull> hulls;
   final String? initialHullId;
 
-  static Future<int?> show(
+  static Future<String?> show(
     BuildContext context, {
     required String projectId,
     required List<Hull> hulls,
     String? initialHullId,
   }) {
-    return showDialog<int>(
+    return showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (_) => BlocksDialog(projectId: projectId, hulls: hulls, initialHullId: initialHullId),
@@ -39,15 +42,24 @@ class BlocksDialog extends ConsumerStatefulWidget {
   ConsumerState<BlocksDialog> createState() => _BlocksDialogState();
 }
 
-/// Editable fields of one generated block, keyed by its default code.
+/// Weight in tonnes as typed in the dialog (`12.5`, up to 3 decimals = kg).
+String _tonnes(double? kg) {
+  if (kg == null) return '';
+  final s = (kg / 1000).toStringAsFixed(3);
+  return s.replaceFirst(RegExp(r'\.?0+$'), '');
+}
+
+/// Editable fields of one generated block (keyed by its default code) or of
+/// an existing block (keyed by its component id).
 class _RowFields {
-  _RowFields(String code, String name)
+  _RowFields(String code, String name, {String weight = ''})
     : code = TextEditingController(text: code),
-      name = TextEditingController(text: name);
+      name = TextEditingController(text: name),
+      weight = TextEditingController(text: weight);
 
   final TextEditingController code;
   final TextEditingController name;
-  final TextEditingController weight = TextEditingController();
+  final TextEditingController weight;
 
   void dispose() {
     code.dispose();
@@ -64,18 +76,170 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
   /// Requested number of blocks per (type code, side).
   final Map<(String, BlockSide), int> _counts = {};
   final Map<String, _RowFields> _fields = {};
+
+  /// Edit mode: fields of the existing blocks by component id.
+  final Map<String, _RowFields> _editFields = {};
+  bool _editing = false;
   bool _saving = false;
+  String? _progress;
   String? _deletingId;
   List<String> _errors = const [];
+
+  /// Result of the last save that the user should read before closing.
+  List<String> _notices = const [];
+  String? _summary;
 
   Hull? get _hull => widget.hulls.where((h) => h.id == _hullId).firstOrNull;
 
   @override
   void dispose() {
-    for (final f in _fields.values) {
+    for (final f in [..._fields.values, ..._editFields.values]) {
       f.dispose();
     }
     super.dispose();
+  }
+
+  void _startEditing(List<HullBlock> existing) {
+    setState(() {
+      for (final b in existing) {
+        _editFields[b.componentId] = _RowFields(b.blockNo, b.name, weight: _tonnes(b.weightKg));
+      }
+      _editing = true;
+      _errors = const [];
+      _notices = const [];
+    });
+  }
+
+  void _stopEditing() {
+    setState(() {
+      for (final f in _editFields.values) {
+        f.dispose();
+      }
+      _editFields.clear();
+      _editing = false;
+      _errors = const [];
+    });
+  }
+
+  /// Saves the changed names / weights, then brings the hull's planned erection
+  /// lifts in line with the weights (also lifts left behind by an earlier save).
+  Future<void> _saveEdits(Hull hull, List<HullBlock> existing, List<TwinComponent> components) async {
+    final edits = <BlockEdit>[];
+    final errors = <String>[];
+    for (final b in existing) {
+      final f = _editFields[b.componentId];
+      if (f == null) continue;
+      final text = f.weight.text.trim();
+      final weight = _weight(f);
+      if (text.isNotEmpty && weight == null) {
+        errors.add('Weight of block ${b.blockNo} is not a number.');
+        continue;
+      }
+      final edit = BlockEdit(block: b, name: f.name.text, weightT: weight);
+      if (!edit.hasChanges) continue;
+      errors.addAll(edit.validationErrors());
+      edits.add(edit);
+    }
+    final activities = ref.read(activitiesProvider(widget.projectId)).value;
+    final bookings = ref.read(bookingsProvider(widget.projectId)).value;
+    if (activities == null || bookings == null) errors.add('Schedule and bookings are still loading - try again.');
+    if (errors.isNotEmpty) {
+      setState(() => _errors = errors);
+      return;
+    }
+
+    final sync = LiftPlan.syncLoads(
+      hull: hull,
+      activities: activities!,
+      components: components,
+      bookings: bookings!,
+      now: DateTime.now(),
+      weightKgOverrides: {
+        for (final e in edits)
+          if (e.weightChanged) e.block.componentId: e.weightKg,
+      },
+    );
+    if (edits.isEmpty && sync.updates.isEmpty) {
+      setState(() => _errors = ['Nothing to save: no name or weight was changed.', ...sync.warnings]);
+      return;
+    }
+
+    final repo = ref.read(shipyardRepositoryProvider);
+    setState(() {
+      _saving = true;
+      _errors = const [];
+      _progress = edits.isEmpty ? null : 'Saving ${edits.length} block${edits.length == 1 ? '' : 's'}…';
+    });
+    try {
+      await Future.wait([
+        for (final e in edits) repo.updateBlock(e.block.componentId, name: e.name, weightKg: e.weightKg),
+      ]);
+    } on ShipyardException catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _progress = null;
+          _errors = [e.message];
+        });
+      }
+      return;
+    }
+
+    var done = 0;
+    try {
+      for (final u in sync.updates) {
+        if (!mounted) return;
+        setState(() => _progress = 'Updating crane lifts ${done + 1} / ${sync.updates.length}…');
+        await repo.updateBookingPlan(
+          u.booking.id,
+          componentId: u.componentId,
+          startsAt: u.startsAt,
+          endsAt: u.endsAt,
+          loadT: u.loadT,
+          notes: u.notes,
+        );
+        done++;
+      }
+    } on ShipyardException catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _progress = null;
+          _errors = [
+            '${edits.length} block change${edits.length == 1 ? '' : 's'} saved, but the lift update stopped after '
+                '$done of ${sync.updates.length} lifts (lift of ${sync.updates[done].blockNo}): ${e.message}',
+            'Save again to update the remaining lifts.',
+            ...sync.warnings,
+          ];
+        });
+      }
+      return;
+    }
+
+    final moved = sync.updates.where((u) => u.movedStart || u.movedCrane).length;
+    final summary = [
+      if (edits.isNotEmpty) '${edits.length} block${edits.length == 1 ? '' : 's'} saved',
+      if (sync.updates.isNotEmpty)
+        '${sync.updates.length} crane lift${sync.updates.length == 1 ? '' : 's'} updated'
+            '${moved == 0 ? '' : ' ($moved moved to a new window / crane)'}',
+    ].join(', ');
+    if (!mounted) return;
+    if (sync.warnings.isEmpty) {
+      Navigator.of(context).pop('$summary.');
+      return;
+    }
+    // Keep the dialog open so the warnings can be read.
+    for (final f in _editFields.values) {
+      f.dispose();
+    }
+    setState(() {
+      _editFields.clear();
+      _editing = false;
+      _saving = false;
+      _progress = null;
+      _summary = '$summary.';
+      _notices = sync.warnings;
+    });
   }
 
   void _setCount(BlockType type, BlockSide side, int value) {
@@ -90,11 +254,15 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
     setState(() {
       _hullId = id;
       _counts.clear();
-      for (final f in _fields.values) {
+      for (final f in [..._fields.values, ..._editFields.values]) {
         f.dispose();
       }
       _fields.clear();
+      _editFields.clear();
+      _editing = false;
       _errors = const [];
+      _notices = const [];
+      _summary = null;
     });
   }
 
@@ -143,7 +311,11 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
     });
     try {
       await ref.read(shipyardRepositoryProvider).createBlocks(drafts);
-      if (mounted) Navigator.of(context).pop(drafts.length);
+      if (mounted) {
+        Navigator.of(context).pop(
+          '${drafts.length} block${drafts.length == 1 ? '' : 's'} created. Plan their schedule next (Plan).',
+        );
+      }
     } on ShipyardException catch (e) {
       if (mounted) {
         setState(() {
@@ -186,9 +358,14 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
   @override
   Widget build(BuildContext context) {
     final components = ref.watch(componentsProvider(widget.projectId)).value ?? const <TwinComponent>[];
+    // Kept alive for the lift update after saving weights.
+    ref.watch(activitiesProvider(widget.projectId));
+    ref.watch(bookingsProvider(widget.projectId));
     final hull = _hull;
     final existing = hull == null ? const <HullBlock>[] : blocksOfHull(components, hull.hullNo);
-    final generated = hull == null ? const <BlockDraft>[] : _generated(hull, existing);
+    final generated = hull == null || _editing ? const <BlockDraft>[] : _generated(hull, existing);
+    final weighed = existing.where((b) => b.weightKg != null && b.weightKg! > 0).toList();
+    final totalT = weighed.fold<double>(0, (s, b) => s + b.weightKg!) / 1000;
 
     return AlertDialog(
       title: Text(hull == null ? 'Hull blocks' : 'Blocks of ${hull.displayName}'),
@@ -213,14 +390,36 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
                             child: Text(h.displayName, overflow: TextOverflow.ellipsis),
                           ),
                       ],
-                      onChanged: _saving ? null : _selectHull,
+                      onChanged: _saving || _editing ? null : _selectHull,
                     ),
-                    _Section('EXISTING BLOCKS (${existing.length})'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _Section(
+                            'EXISTING BLOCKS (${existing.length})'
+                            '${weighed.isEmpty ? '' : '  ·  ${totalT.toStringAsFixed(1)} t steel, '
+                                      '${weighed.length} of ${existing.length} weighed'}',
+                          ),
+                        ),
+                        if (existing.isNotEmpty && !_editing)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: TextButton.icon(
+                              onPressed: _saving || _deletingId != null ? null : () => _startEditing(existing),
+                              icon: const Icon(Icons.edit_outlined, size: 16),
+                              label: const Text('Edit names / weights'),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (_summary != null) _Notices(summary: _summary!, lines: _notices),
                     if (existing.isEmpty)
                       const Text(
                         'No blocks yet. Enter below how many blocks of each type the hull has.',
                         style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
                       )
+                    else if (_editing)
+                      _ExistingEditor(blocks: existing, fieldsFor: (b) => _editFields[b.componentId], enabled: !_saving)
                     else
                       Wrap(
                         spacing: 6,
@@ -245,28 +444,44 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
                             ),
                         ],
                       ),
-                    const _Section('ADD BLOCKS - number of blocks per type'),
-                    _Catalog(counts: _counts, enabled: !_saving, onChanged: _setCount),
-                    _Section('NEW BLOCKS (${generated.length})'),
-                    if (generated.isEmpty)
-                      const Text(
-                        'Default codes follow the zone numbering: 1xx bottom, 2xx side, 3xx engine room, 4xx decks, '
-                        '5xx fore, 6xx superstructure, 7xx aft, 8xx bulkheads; P / S = port / starboard. '
-                        'Codes and names can be changed before saving.',
-                        style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
-                      )
-                    else
-                      _Preview(drafts: generated, fieldsFor: _fieldsFor, enabled: !_saving),
+                    if (!_editing) ...[
+                      const _Section('ADD BLOCKS - number of blocks per type'),
+                      _Catalog(counts: _counts, enabled: !_saving, onChanged: _setCount),
+                      _Section('NEW BLOCKS (${generated.length})'),
+                      if (generated.isEmpty)
+                        const Text(
+                          'Default codes follow the zone numbering: 1xx bottom, 2xx side, 3xx engine room, 4xx decks, '
+                          '5xx fore, 6xx superstructure, 7xx aft, 8xx bulkheads; P / S = port / starboard. '
+                          'Codes and names can be changed before saving.',
+                          style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+                        )
+                      else
+                        _Preview(drafts: generated, fieldsFor: _fieldsFor, enabled: !_saving),
+                    ],
                     if (_errors.isNotEmpty) _Problems(lines: _errors),
                   ],
                 ),
               ),
       ),
       actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: Text(generated.isEmpty ? 'Close' : 'Cancel'),
-        ),
+        if (_progress != null)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Text(_progress!, style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted)),
+          ),
+        if (_editing) ...[
+          TextButton(onPressed: _saving ? null : _stopEditing, child: const Text('Back')),
+          FilledButton(
+            onPressed: _saving || hull == null ? null : () => _saveEdits(hull, existing, components),
+            child: _saving
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Save changes'),
+          ),
+        ] else
+          TextButton(
+            onPressed: _saving ? null : () => Navigator.of(context).pop(_summary),
+            child: Text(generated.isEmpty ? 'Close' : 'Cancel'),
+          ),
         if (hull != null && generated.isNotEmpty)
           FilledButton(
             onPressed: _saving ? null : () => _create(generated, existing),
@@ -528,6 +743,108 @@ class _Preview extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Existing blocks in erection order with editable name and weight (the code is fixed).
+class _ExistingEditor extends StatelessWidget {
+  const _ExistingEditor({required this.blocks, required this.fieldsFor, required this.enabled});
+
+  final List<HullBlock> blocks;
+  final _RowFields? Function(HullBlock) fieldsFor;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    const head = TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.textMuted);
+    const dense = InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 8));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Weights in tonnes (steel weight of the erected block). Saving also updates the planned erection lifts '
+          'of these blocks: load, lift window length and - if the block is too heavy - the crane. '
+          'Stage days of schedule rows drafted afterwards follow the weight.',
+          style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+        ),
+        const SizedBox(height: 8),
+        const Row(
+          children: [
+            SizedBox(width: 34, child: Text('#', style: head)),
+            SizedBox(width: 96, child: Text('CODE', style: head)),
+            SizedBox(width: 8),
+            Expanded(child: Text('NAME', style: head)),
+            SizedBox(width: 8),
+            SizedBox(width: 84, child: Text('WEIGHT t', style: head)),
+          ],
+        ),
+        for (final b in blocks)
+          if (fieldsFor(b) case final f?)
+            Padding(
+              key: ValueKey(b.componentId),
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 34,
+                    child: Text(
+                      b.erectionSequence >= 999 ? '–' : '${b.erectionSequence}',
+                      style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 96,
+                    child: Text(b.blockNo, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: f.name,
+                      enabled: enabled,
+                      style: const TextStyle(fontSize: 12.5),
+                      decoration: dense,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 84,
+                    child: TextField(
+                      controller: f.weight,
+                      enabled: enabled,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      style: const TextStyle(fontSize: 12.5),
+                      decoration: dense.copyWith(hintText: '—'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+      ],
+    );
+  }
+}
+
+/// Outcome of a save with notes on lifts that were left unchanged.
+class _Notices extends StatelessWidget {
+  const _Notices({required this.summary, required this.lines});
+
+  final String summary;
+  final List<String> lines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: const Color(0xFF422006), borderRadius: BorderRadius.circular(8)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(summary, style: const TextStyle(color: Color(0xFFFDE68A), fontSize: 12.5, fontWeight: FontWeight.w700)),
+          for (final l in lines) Text('• $l', style: const TextStyle(color: Color(0xFFFDE68A), fontSize: 12.5)),
+        ],
+      ),
     );
   }
 }

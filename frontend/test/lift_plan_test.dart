@@ -196,4 +196,130 @@ void main() {
     expect(row['booking_type'], 'lift');
     expect(row['load_t'], 85);
   });
+
+  group('syncLoads', () {
+    ResourceBooking lift(
+      ProductionActivity a,
+      String craneId,
+      DateTime start, {
+      int hours = 3,
+      double? loadT,
+      BookingStatus status = BookingStatus.planned,
+      String? notes = LiftPlan.noWeightNote,
+    }) => ResourceBooking(
+      id: 'lift-${a.id}',
+      projectId: 'p',
+      componentId: craneId,
+      hullId: 'h1',
+      activityId: a.id,
+      title: '${a.name} lift',
+      type: BookingType.lift,
+      slot: 1,
+      startsAt: start,
+      endsAt: start.add(Duration(hours: hours)),
+      loadT: loadT,
+      status: status,
+      notes: notes,
+    );
+
+    LiftSyncResult sync(
+      List<ProductionActivity> activities,
+      List<TwinComponent> blocks,
+      List<ResourceBooking> bookings, {
+      List<TwinComponent> extraCranes = const [],
+      Map<String, double?> overrides = const {},
+    }) => LiftPlan.syncLoads(
+      hull: hull,
+      activities: activities,
+      components: [goliath, portal, quay, ...extraCranes, ...blocks],
+      bookings: bookings,
+      now: now,
+      weightKgOverrides: overrides,
+    );
+
+    test('weights become the load; longer lifts keep their start or move to a free window', () {
+      final day = DateTime(2027, 1, 4);
+      final a1 = erection('DB-101', day);
+      final a2 = erection('DB-102', day);
+      final a3 = erection('DB-103', day);
+      final r = sync(
+        [a1, a2, a3],
+        [block('DB-101'), block('DB-102', weightKg: 250000), block('DB-103')],
+        [
+          lift(a1, 'goliath', DateTime(2027, 1, 4, 7)),
+          lift(a2, 'goliath', DateTime(2027, 1, 4, 10)),
+          lift(a3, 'goliath', DateTime(2027, 1, 4, 13)),
+        ],
+        // DB-101 edited in the dialog, the component list has not reloaded yet.
+        overrides: {'b-DB-101': 85000},
+      );
+      expect(r.warnings, isEmpty);
+      // DB-103 has no weight and a 3 h window: nothing to change.
+      expect(r.updates.map((u) => u.blockNo), ['DB-101', 'DB-102']);
+      final first = r.updates.first;
+      expect(first.loadT, 85);
+      expect(first.startsAt, DateTime(2027, 1, 4, 7));
+      expect(first.endsAt, DateTime(2027, 1, 4, 10));
+      expect(first.notes, isNull);
+      expect(first.movedStart || first.movedCrane, isFalse);
+      // 250 t -> 4 h: 10:00-14:00 runs into DB-103 at 13:00, next free 4 h window is the next morning.
+      final second = r.updates.last;
+      expect(second.loadT, 250);
+      expect(second.startsAt, DateTime(2027, 1, 5, 7));
+      expect(second.endsAt, DateTime(2027, 1, 5, 11));
+      expect(second.movedStart, isTrue);
+      expect(second.componentId, 'goliath');
+    });
+
+    test('cleared weight restores the note; confirmed and past lifts are only reported', () {
+      final a1 = erection('DB-101', DateTime(2027, 1, 4));
+      final a2 = erection('DB-102', DateTime(2027, 1, 4));
+      final a3 = erection('DB-103', DateTime(2026, 11, 16));
+      final r = sync(
+        [a1, a2, a3],
+        [block('DB-101', weightKg: 50000), block('DB-102', weightKg: 90000), block('DB-103', weightKg: 40000)],
+        [
+          lift(a1, 'goliath', DateTime(2027, 1, 4, 7), loadT: 50, notes: null),
+          lift(a2, 'goliath', DateTime(2027, 1, 4, 10), status: BookingStatus.confirmed),
+          lift(a3, 'goliath', DateTime(2026, 11, 16, 7)),
+        ],
+        overrides: {'b-DB-101': null},
+      );
+      final u = r.updates.single;
+      expect(u.blockNo, 'DB-101');
+      expect(u.loadT, isNull);
+      expect(u.notes, LiftPlan.noWeightNote);
+      expect(u.startsAt, DateTime(2027, 1, 4, 7));
+      expect(r.warnings.single, allOf(contains('DB-102'), contains('DB-103'), contains('confirmed')));
+    });
+
+    test('a block too heavy for the booked crane moves to a crane that carries it', () {
+      final jib = comp('jib', 'crane', {'swl_t': 100, 'location': berth});
+      final a1 = erection('DB-101', DateTime(2027, 1, 4));
+      final a2 = erection('DB-102', DateTime(2027, 1, 4));
+      final r = sync(
+        [a1, a2],
+        [block('DB-101', weightKg: 300000), block('DB-102', weightKg: 700000)],
+        [lift(a1, 'jib', DateTime(2027, 1, 4, 9)), lift(a2, 'jib', DateTime(2027, 1, 4, 13))],
+        extraCranes: [jib],
+      );
+      final u = r.updates.single;
+      expect(u.componentId, 'goliath');
+      expect(u.movedCrane, isTrue);
+      expect(u.loadT, 300);
+      expect(u.startsAt, DateTime(2027, 1, 4, 7));
+      expect(u.endsAt, DateTime(2027, 1, 4, 11));
+      expect(r.warnings.single, contains('DB-102 (700 t)'));
+      final row = ResourceBookingModel.planUpdate(
+        componentId: u.componentId,
+        startsAt: u.startsAt,
+        endsAt: u.endsAt,
+        loadT: u.loadT,
+        notes: u.notes,
+      );
+      expect(row['component_id'], 'goliath');
+      expect(row['load_t'], 300);
+      expect(row.containsKey('status'), isFalse);
+    });
+  });
 }

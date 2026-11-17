@@ -23,6 +23,41 @@ class LiftPlanResult {
   final Map<String, int> cranes;
 }
 
+/// New crane, window, load and notes of an existing lift ([LiftPlan.syncLoads]).
+class LiftUpdate {
+  const LiftUpdate({
+    required this.booking,
+    required this.blockNo,
+    required this.componentId,
+    required this.startsAt,
+    required this.endsAt,
+    required this.loadT,
+    required this.notes,
+  });
+
+  final ResourceBooking booking;
+  final String blockNo;
+
+  /// Crane (component id); differs from the booking's when the block is too heavy for it.
+  final String componentId;
+  final DateTime startsAt;
+  final DateTime endsAt;
+  final double? loadT;
+  final String? notes;
+
+  bool get movedCrane => componentId != booking.componentId;
+
+  bool get movedStart => startsAt != booking.startsAt;
+}
+
+/// Result of [LiftPlan.syncLoads]: updates to apply in order plus notes on lifts left as they are.
+class LiftSyncResult {
+  const LiftSyncResult(this.updates, this.warnings);
+
+  final List<LiftUpdate> updates;
+  final List<String> warnings;
+}
+
 /// Crane lifts for block erection: one `lift` booking per erection row of a
 /// hull (block-level rows, not done, without a booking yet) on a crane whose
 /// `metadata.location` is the erection area (building berth -> Goliath, dry
@@ -142,7 +177,7 @@ class LiftPlan {
           endsAt: end,
           loadT: loadT,
           status: BookingStatus.planned,
-          notes: loadT == null ? 'Block weight not entered - booked without a capacity check.' : null,
+          notes: loadT == null ? noWeightNote : null,
         ),
       );
     }
@@ -158,6 +193,130 @@ class LiftPlan {
         '$withoutWeight block${withoutWeight == 1 ? ' has' : 's have'} no weight: booked without a load, '
             'so the database cannot check the crane capacity.',
     ], cranes: perCrane);
+  }
+
+  /// Note of lifts booked for a block without a weight.
+  static const noWeightNote = 'Block weight not entered - booked without a capacity check.';
+
+  /// Brings the `planned` erection lifts of [hull]'s blocks in line with the
+  /// block weights: `load_t` = weight, window length = [liftDuration]. A lift
+  /// keeps its start when the new window still fits the working day and is
+  /// free; otherwise it moves to the first free window of the erection days.
+  /// A block heavier than the booked crane moves to the smallest crane at the
+  /// erection area that carries it. Lifts that are already running / past or
+  /// not `planned` (confirmed by the operator) are left alone and reported.
+  ///
+  /// [weightKgOverrides] (block component id -> kg, `null` = cleared) wins over
+  /// the components' `weight_kg`, so edits can be planned before the component
+  /// list reloads. Apply the updates in the returned order: each window was
+  /// checked against the earlier updates and the later lifts' current windows.
+  static LiftSyncResult syncLoads({
+    required Hull hull,
+    required List<ProductionActivity> activities,
+    required List<TwinComponent> components,
+    required List<ResourceBooking> bookings,
+    required DateTime now,
+    Map<String, double?> weightKgOverrides = const {},
+  }) {
+    final byId = {for (final c in components) c.id: c};
+    final activityById = {for (final a in activities) a.id: a};
+    final cranes = components.where((c) => c.category == 'crane').toList();
+    final busy = <String, List<(DateTime, DateTime)>>{
+      for (final c in cranes)
+        c.id: [
+          for (final b in bookings)
+            if (!b.isCancelled && b.componentId == c.id && b.slot == 1) (b.startsAt, b.endsAt),
+        ],
+    };
+
+    final lifts =
+        bookings.where((b) {
+          final a = b.activityId == null ? null : activityById[b.activityId];
+          return b.type == BookingType.lift &&
+              !b.isCancelled &&
+              a != null &&
+              a.hullId == hull.id &&
+              a.componentId != null &&
+              a.stage == ProductionStage.erection;
+        }).toList()..sort((x, y) => x.startsAt.compareTo(y.startsAt));
+
+    final updates = <LiftUpdate>[];
+    final locked = <String>[];
+    final tooHeavy = <String>[];
+    final noWindow = <String>[];
+
+    for (final b in lifts) {
+      final a = activityById[b.activityId]!;
+      final block = byId[a.componentId];
+      final blockNo = '${block?.metadata['block_no'] ?? block?.name ?? a.code}';
+      final kg = weightKgOverrides.containsKey(a.componentId) ? weightKgOverrides[a.componentId] : block?.weightKg;
+      final loadT = kg == null || kg <= 0 ? null : kg / 1000;
+      final duration = liftDuration(loadT);
+      final sameLoad = (loadT == null && b.loadT == null) || (loadT != null && b.loadT != null && (loadT - b.loadT!).abs() < 0.0005);
+      if (sameLoad && b.endsAt.difference(b.startsAt) == duration) continue;
+      if (b.status != BookingStatus.planned || b.startsAt.isBefore(now)) {
+        locked.add(blockNo);
+        continue;
+      }
+
+      final crane = byId[b.componentId];
+      final fitsCrane = loadT == null || crane == null || (resourceCapacityT(crane) ?? double.infinity) >= loadT;
+      final own = busy[b.componentId];
+      own?.remove((b.startsAt, b.endsAt));
+
+      DateTime? start;
+      var craneId = b.componentId;
+      final keptEnd = b.startsAt.add(duration);
+      final dayEnd = DateTime(b.startsAt.year, b.startsAt.month, b.startsAt.day, dayEndHour);
+      if (fitsCrane &&
+          !keptEnd.isAfter(dayEnd) &&
+          (own ?? const []).every((w) => !(w.$1.isBefore(keptEnd) && w.$2.isAfter(b.startsAt)))) {
+        start = b.startsAt;
+      } else {
+        final atArea = cranes.where((c) => c.metadata['location'] == a.locationNodeId).toList();
+        final fitting =
+            atArea.where((c) {
+              final cap = resourceCapacityT(c);
+              return loadT == null || cap == null || cap >= loadT;
+            }).toList()..sort((x, y) {
+              // The booked crane first, then the smallest that carries the block.
+              if (x.id == b.componentId) return -1;
+              if (y.id == b.componentId) return 1;
+              return (resourceCapacityT(x) ?? double.infinity).compareTo(resourceCapacityT(y) ?? double.infinity);
+            });
+        if (fitting.isEmpty) {
+          own?.add((b.startsAt, b.endsAt));
+          tooHeavy.add('$blockNo (${loadT!.toStringAsFixed(0)} t)');
+          continue;
+        }
+        final window = _firstFreeWindow(a, fitting, busy, duration, now);
+        if (window == null) {
+          own?.add((b.startsAt, b.endsAt));
+          noWindow.add(blockNo);
+          continue;
+        }
+        craneId = window.$1.id;
+        start = window.$2;
+      }
+
+      final end = start.add(duration);
+      busy[craneId]?.add((start, end));
+      final notes = loadT == null
+          ? (b.notes == null || b.notes!.trim().isEmpty ? noWeightNote : b.notes)
+          : (b.notes == noWeightNote ? null : b.notes);
+      updates.add(
+        LiftUpdate(booking: b, blockNo: blockNo, componentId: craneId, startsAt: start, endsAt: end, loadT: loadT, notes: notes),
+      );
+    }
+
+    String list(List<String> l) => l.length <= 6 ? l.join(', ') : '${l.take(6).join(', ')} +${l.length - 6} more';
+    return LiftSyncResult(updates, [
+      if (locked.isNotEmpty)
+        'Not changed (confirmed by the crane operator, running or past): ${list(locked)} - '
+            'update their load in Resources.',
+      if (tooHeavy.isNotEmpty) 'Heavier than the cranes at the erection area, lift kept unchanged: ${list(tooHeavy)}.',
+      if (noWindow.isNotEmpty) 'No free crane window for the longer lift in the erection days: ${list(noWindow)}.',
+    ]);
   }
 
   /// First (crane, start) inside the working hours of the erection days, earliest

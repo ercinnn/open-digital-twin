@@ -168,4 +168,50 @@ void main() {
       expect(blocks.first.type?.code, 'SS');
     });
   });
+
+  group('block edit', () {
+    const block = HullBlock(
+      componentId: 'c1',
+      meshNodeId: 'NODE_NB1001_BLOCK_DB_101',
+      hullNo: 'NB-1001',
+      blockNo: 'DB-101',
+      name: 'NB-1001 Block DB-101 (Double bottom)',
+      side: BlockSide.centre,
+      erectionSequence: 1,
+      weightKg: 85000,
+    );
+
+    test('detects name and weight changes in whole kilograms', () {
+      expect(
+        const BlockEdit(block: block, name: ' NB-1001 Block DB-101 (Double bottom) ', weightT: 85).hasChanges,
+        isFalse,
+      );
+      expect(
+        const BlockEdit(block: block, name: 'NB-1001 Block DB-101 (Double bottom)', weightT: 85.0004).hasChanges,
+        isFalse,
+      );
+      const heavier = BlockEdit(block: block, name: 'NB-1001 Block DB-101 (Double bottom)', weightT: 86.25);
+      expect(heavier.weightChanged, isTrue);
+      expect(heavier.nameChanged, isFalse);
+      expect(heavier.weightKg, 86250);
+      const cleared = BlockEdit(block: block, name: 'DB-101 renamed', weightT: null);
+      expect(cleared.weightChanged, isTrue);
+      expect(cleared.nameChanged, isTrue);
+      expect(cleared.weightKg, isNull);
+      expect(BlockModel.edit(name: ' DB-101 renamed ', weightKg: cleared.weightKg), {
+        'name': 'DB-101 renamed',
+        'weight_kg': null,
+      });
+    });
+
+    test('validation', () {
+      expect(const BlockEdit(block: block, name: 'x', weightT: 12).validationErrors(), isEmpty);
+      expect(const BlockEdit(block: block, name: ' ', weightT: 12).validationErrors().single, contains('name'));
+      expect(
+        const BlockEdit(block: block, name: 'x', weightT: 0).validationErrors().single,
+        contains('greater than 0'),
+      );
+      expect(const BlockEdit(block: block, name: 'x', weightT: 85000).validationErrors().single, contains('tonnes'));
+    });
+  });
 }

@@ -31,6 +31,9 @@ abstract interface class ShipyardRepository {
   /// nothing). Throws [ShipyardException] e.g. when a block code is taken.
   Future<void> createBlocks(List<BlockDraft> drafts);
 
+  /// Changes name and weight (`weight_kg`, `null` clears it) of a block (editors).
+  Future<void> updateBlock(String componentId, {required String name, required double? weightKg});
+
   /// Deletes a block; its schedule rows are deleted with it, bookings,
   /// inspections, punch items and permits keep their row without the block.
   Future<void> deleteBlock(String componentId);
@@ -63,6 +66,18 @@ abstract interface class ShipyardRepository {
   Future<void> createBookings(List<BookingDraft> drafts);
 
   Future<void> setBookingStatus(String bookingId, BookingStatus status);
+
+  /// Moves a booking to another resource / window and sets its load and notes.
+  /// Throws [ShipyardException] on double booking or when the load exceeds the
+  /// resource capacity (database checks).
+  Future<void> updateBookingPlan(
+    String bookingId, {
+    required String componentId,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    required double? loadT,
+    required String? notes,
+  });
 
   // ---- Materials (008) --------------------------------------------------------
   Future<List<MaterialItem>> fetchMaterials(String projectId);

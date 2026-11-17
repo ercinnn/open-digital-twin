@@ -35,4 +35,19 @@ class ResourceBookingModel {
     'notes': d.notes,
     'status': d.status.dbValue,
   };
+
+  /// Resource, window, load and notes of an existing booking.
+  static Map<String, dynamic> planUpdate({
+    required String componentId,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    required double? loadT,
+    required String? notes,
+  }) => {
+    'component_id': componentId,
+    'starts_at': writeTimestamp(startsAt),
+    'ends_at': writeTimestamp(endsAt),
+    'load_t': loadT,
+    'notes': notes,
+  };
 }

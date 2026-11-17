@@ -219,14 +219,14 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
   }
 
   Future<void> _blocks(List<Hull> hulls) async {
-    final created = await BlocksDialog.show(
+    final message = await BlocksDialog.show(
       context,
       projectId: widget.projectId,
       hulls: hulls,
       initialHullId: _hullFilter,
     );
-    if (created == null || created == 0 || !mounted) return;
-    _snack('$created block${created == 1 ? '' : 's'} created. Plan their schedule next (Plan).');
+    if (message == null || !mounted) return;
+    _snack(message);
   }
 
   Widget _blocksButton(List<Hull> hulls) => Padding(

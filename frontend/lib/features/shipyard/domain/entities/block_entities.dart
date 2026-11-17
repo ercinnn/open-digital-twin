@@ -295,3 +295,31 @@ class BlockDraft {
     ];
   }
 }
+
+/// New name and weight of an existing block (Blocks dialog, edit mode). The
+/// block code stays: it is part of the mesh id that schedule rows, bookings
+/// and the 3D view refer to.
+class BlockEdit {
+  const BlockEdit({required this.block, required this.name, required this.weightT});
+
+  final HullBlock block;
+  final String name;
+
+  /// Weight in tonnes; `null` clears it.
+  final double? weightT;
+
+  /// Weight as stored in `components.weight_kg` (whole kilograms).
+  double? get weightKg => weightT == null ? null : (weightT! * 1000).roundToDouble();
+
+  bool get nameChanged => name.trim() != block.name;
+
+  bool get weightChanged => weightKg?.round() != block.weightKg?.round();
+
+  bool get hasChanges => nameChanged || weightChanged;
+
+  List<String> validationErrors() => [
+    if (name.trim().isEmpty) 'Enter a name for block ${block.blockNo}.',
+    if (weightT != null && weightT! <= 0) 'Weight of block ${block.blockNo} must be greater than 0.',
+    if (weightT != null && weightT! > 5000) 'Weight of block ${block.blockNo}: enter tonnes, not kilograms.',
+  ];
+}
