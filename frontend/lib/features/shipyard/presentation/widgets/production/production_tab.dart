@@ -156,6 +156,7 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
       hulls: hulls,
       existing: activities,
       areas: yardAreas(components),
+      components: components,
       initialHullId: _hullFilter,
     );
     if (hullId == null || !mounted) return;
