@@ -9,6 +9,7 @@ import '../../../domain/entities/block_entities.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
 import '../../../domain/services/block_breakdown.dart';
+import '../../../domain/services/block_weights.dart';
 import '../../../domain/services/lift_plan.dart';
 import '../../providers/shipyard_providers.dart';
 
@@ -47,6 +48,25 @@ String _tonnes(double? kg) {
   if (kg == null) return '';
   final s = (kg / 1000).toStringAsFixed(3);
   return s.replaceFirst(RegExp(r'\.?0+$'), '');
+}
+
+/// Hint of a weight field: the estimate that is saved when the field stays empty.
+String _estimateHint(double? t) => t == null ? '—' : '≈ ${t.toStringAsFixed(1)}';
+
+/// What the weight estimate is based on.
+class _Basis extends StatelessWidget {
+  const _Basis(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      '$text Empty weight fields (≈ grey) are saved with this estimate.',
+      style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+    ),
+  );
 }
 
 /// Editable fields of one generated block (keyed by its default code) or of
@@ -123,22 +143,30 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
 
   /// Saves the changed names / weights, then brings the hull's planned erection
   /// lifts in line with the weights (also lifts left behind by an earlier save).
-  Future<void> _saveEdits(Hull hull, List<HullBlock> existing, List<TwinComponent> components) async {
+  Future<void> _saveEdits(
+    Hull hull,
+    List<HullBlock> existing,
+    List<TwinComponent> components,
+    Map<String, double> estimates,
+  ) async {
     final edits = <BlockEdit>[];
     final errors = <String>[];
+    var estimated = 0;
     for (final b in existing) {
       final f = _editFields[b.componentId];
       if (f == null) continue;
       final text = f.weight.text.trim();
-      final weight = _weight(f);
-      if (text.isNotEmpty && weight == null) {
+      final typed = _weight(f);
+      if (text.isNotEmpty && typed == null) {
         errors.add('Weight of block ${b.blockNo} is not a number.');
         continue;
       }
-      final edit = BlockEdit(block: b, name: f.name.text, weightT: weight);
+      // An empty weight field takes the estimate.
+      final edit = BlockEdit(block: b, name: f.name.text, weightT: typed ?? estimates[b.componentId]);
       if (!edit.hasChanges) continue;
       errors.addAll(edit.validationErrors());
       edits.add(edit);
+      if (typed == null && edit.weightChanged) estimated++;
     }
     final activities = ref.read(activitiesProvider(widget.projectId)).value;
     final bookings = ref.read(bookingsProvider(widget.projectId)).value;
@@ -218,7 +246,9 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
 
     final moved = sync.updates.where((u) => u.movedStart || u.movedCrane).length;
     final summary = [
-      if (edits.isNotEmpty) '${edits.length} block${edits.length == 1 ? '' : 's'} saved',
+      if (edits.isNotEmpty)
+        '${edits.length} block${edits.length == 1 ? '' : 's'} saved'
+            '${estimated == 0 ? '' : ' ($estimated weight${estimated == 1 ? '' : 's'} from the estimate)'}',
       if (sync.updates.isNotEmpty)
         '${sync.updates.length} crane lift${sync.updates.length == 1 ? '' : 's'} updated'
             '${moved == 0 ? '' : ' ($moved moved to a new window / crane)'}',
@@ -287,14 +317,21 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
 
   double? _weight(_RowFields f) => double.tryParse(f.weight.text.trim().replaceAll(',', '.'));
 
-  /// Generated drafts with the user's edits applied.
-  List<BlockDraft> _edited(List<BlockDraft> generated) => [
+  /// Estimate key of a generated block (existing blocks use their component id).
+  static String _newKey(BlockDraft d) => 'new:${d.blockNo}';
+
+  /// Generated drafts with the user's edits applied; an empty weight takes the estimate.
+  List<BlockDraft> _edited(List<BlockDraft> generated, Map<String, double> estimates) => [
     for (final d in generated)
-      d.copyWith(blockNo: _fieldsFor(d).code.text, name: _fieldsFor(d).name.text, weightT: _weight(_fieldsFor(d))),
+      d.copyWith(
+        blockNo: _fieldsFor(d).code.text,
+        name: _fieldsFor(d).name.text,
+        weightT: _weight(_fieldsFor(d)) ?? estimates[_newKey(d)],
+      ),
   ];
 
-  Future<void> _create(List<BlockDraft> generated, List<HullBlock> existing) async {
-    final drafts = _edited(generated);
+  Future<void> _create(List<BlockDraft> generated, List<HullBlock> existing, Map<String, double> estimates) async {
+    final drafts = _edited(generated, estimates);
     final errors = [
       for (final d in generated)
         if (_fieldsFor(d).weight.text.trim().isNotEmpty && _weight(_fieldsFor(d)) == null)
@@ -364,6 +401,13 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
     final hull = _hull;
     final existing = hull == null ? const <HullBlock>[] : blocksOfHull(components, hull.hullNo);
     final generated = hull == null || _editing ? const <BlockDraft>[] : _generated(hull, existing);
+    final estimate = hull == null
+        ? null
+        : BlockWeights.estimate(hull, [
+            for (final b in existing) (b.componentId, b.type, b.side),
+            for (final d in generated) (_newKey(d), d.type, d.side),
+          ]);
+    final estimates = estimate?.blockT ?? const <String, double>{};
     final weighed = existing.where((b) => b.weightKg != null && b.weightKg! > 0).toList();
     final totalT = weighed.fold<double>(0, (s, b) => s + b.weightKg!) / 1000;
 
@@ -419,7 +463,19 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
                         style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
                       )
                     else if (_editing)
-                      _ExistingEditor(blocks: existing, fieldsFor: (b) => _editFields[b.componentId], enabled: !_saving)
+                      _ExistingEditor(
+                        blocks: existing,
+                        fieldsFor: (b) => _editFields[b.componentId],
+                        estimates: estimates,
+                        basis: estimate?.basis,
+                        enabled: !_saving,
+                        onUseEstimates: () {
+                          for (final f in _editFields.values) {
+                            f.weight.clear();
+                          }
+                          setState(() => _errors = const []);
+                        },
+                      )
                     else
                       Wrap(
                         spacing: 6,
@@ -455,8 +511,15 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
                           'Codes and names can be changed before saving.',
                           style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
                         )
-                      else
-                        _Preview(drafts: generated, fieldsFor: _fieldsFor, enabled: !_saving),
+                      else ...[
+                        if (estimate != null) _Basis(estimate.basis),
+                        _Preview(
+                          drafts: generated,
+                          fieldsFor: _fieldsFor,
+                          estimateOf: (d) => estimates[_newKey(d)],
+                          enabled: !_saving,
+                        ),
+                      ],
                     ],
                     if (_errors.isNotEmpty) _Problems(lines: _errors),
                   ],
@@ -472,7 +535,7 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
         if (_editing) ...[
           TextButton(onPressed: _saving ? null : _stopEditing, child: const Text('Back')),
           FilledButton(
-            onPressed: _saving || hull == null ? null : () => _saveEdits(hull, existing, components),
+            onPressed: _saving || hull == null ? null : () => _saveEdits(hull, existing, components, estimates),
             child: _saving
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('Save changes'),
@@ -484,7 +547,7 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
           ),
         if (hull != null && generated.isNotEmpty)
           FilledButton(
-            onPressed: _saving ? null : () => _create(generated, existing),
+            onPressed: _saving ? null : () => _create(generated, existing, estimates),
             child: _saving
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                 : Text('Create ${generated.length} block${generated.length == 1 ? '' : 's'}'),
@@ -676,10 +739,11 @@ class _CounterState extends State<_Counter> {
 
 /// Generated blocks with editable code, name and weight.
 class _Preview extends StatelessWidget {
-  const _Preview({required this.drafts, required this.fieldsFor, required this.enabled});
+  const _Preview({required this.drafts, required this.fieldsFor, required this.estimateOf, required this.enabled});
 
   final List<BlockDraft> drafts;
   final _RowFields Function(BlockDraft) fieldsFor;
+  final double? Function(BlockDraft) estimateOf;
   final bool enabled;
 
   @override
@@ -736,7 +800,7 @@ class _Preview extends StatelessWidget {
                     enabled: enabled,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     style: const TextStyle(fontSize: 12.5),
-                    decoration: dense.copyWith(hintText: 'optional'),
+                    decoration: dense.copyWith(hintText: _estimateHint(estimateOf(d))),
                   ),
                 ),
               ],
@@ -749,11 +813,23 @@ class _Preview extends StatelessWidget {
 
 /// Existing blocks in erection order with editable name and weight (the code is fixed).
 class _ExistingEditor extends StatelessWidget {
-  const _ExistingEditor({required this.blocks, required this.fieldsFor, required this.enabled});
+  const _ExistingEditor({
+    required this.blocks,
+    required this.fieldsFor,
+    required this.estimates,
+    required this.basis,
+    required this.enabled,
+    required this.onUseEstimates,
+  });
 
   final List<HullBlock> blocks;
   final _RowFields? Function(HullBlock) fieldsFor;
+
+  /// Estimated weight (t) by component id.
+  final Map<String, double> estimates;
+  final String? basis;
   final bool enabled;
+  final VoidCallback onUseEstimates;
 
   @override
   Widget build(BuildContext context) {
@@ -768,7 +844,23 @@ class _ExistingEditor extends StatelessWidget {
           'Stage days of schedule rows drafted afterwards follow the weight.',
           style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
+        if (basis != null) ...[
+          _Basis(basis!),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: enabled ? onUseEstimates : null,
+              icon: const Icon(Icons.auto_fix_high_outlined, size: 16),
+              label: const Text('Use estimates for all'),
+            ),
+          ),
+        ] else
+          const Text(
+            'Enter length and beam of the hull to get estimated weights.',
+            style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+          ),
+        const SizedBox(height: 4),
         const Row(
           children: [
             SizedBox(width: 34, child: Text('#', style: head)),
@@ -814,7 +906,7 @@ class _ExistingEditor extends StatelessWidget {
                       enabled: enabled,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       style: const TextStyle(fontSize: 12.5),
-                      decoration: dense.copyWith(hintText: '—'),
+                      decoration: dense.copyWith(hintText: _estimateHint(estimates[b.componentId])),
                     ),
                   ),
                 ],
