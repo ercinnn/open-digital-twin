@@ -53,6 +53,7 @@ class MaterialItem {
     required this.onHand,
     required this.reserved,
     required this.reorderLevel,
+    this.blockReserved = 0,
     this.grade,
     this.dimensions,
     this.locationComponentId,
@@ -70,7 +71,12 @@ class MaterialItem {
   final String? dimensions;
   final String unit;
   final double onHand;
+
+  /// Manual reservation, not tied to a block (`quantity_reserved`).
   final double reserved;
+
+  /// Open block reservations (`quantity_block_reserved`, kept by the database).
+  final double blockReserved;
   final double reorderLevel;
   final String? locationComponentId;
   final String? hullId;
@@ -78,8 +84,10 @@ class MaterialItem {
   final String? certificateNo;
   final String? supplier;
 
+  double get totalReserved => reserved + blockReserved;
+
   /// Free stock after reservations (negative = shortage).
-  double get available => onHand - reserved;
+  double get available => onHand - reserved - blockReserved;
 
   StockState get state {
     if (available < 0) return StockState.shortage;
@@ -189,3 +197,91 @@ class TraceEvent {
 
 /// Normalizes scanner input (keyboard-wedge scanners may add whitespace / lowercase).
 String normalizeTag(String raw) => raw.trim().toUpperCase();
+
+enum ReservationStatus {
+  reserved('reserved', 'Reserved'),
+  issued('issued', 'Issued');
+
+  const ReservationStatus(this.dbValue, this.label);
+
+  final String dbValue;
+  final String label;
+
+  static ReservationStatus fromDb(String? v) =>
+      ReservationStatus.values.firstWhere((s) => s.dbValue == v, orElse: () => ReservationStatus.reserved);
+}
+
+/// Table `material_reservations`: stock reserved for a block of a hull.
+class MaterialReservation {
+  const MaterialReservation({
+    required this.id,
+    required this.itemId,
+    required this.componentId,
+    required this.quantity,
+    required this.status,
+    this.hullId,
+    this.neededBy,
+    this.issuedAt,
+    this.notes,
+  });
+
+  final String id;
+  final String itemId;
+
+  /// The block (or other component) the material is for.
+  final String componentId;
+  final String? hullId;
+  final double quantity;
+  final ReservationStatus status;
+
+  /// Start of the block's first shop stage.
+  final DateTime? neededBy;
+  final DateTime? issuedAt;
+  final String? notes;
+
+  bool get isOpen => status == ReservationStatus.reserved;
+
+  /// Open and needed before [today] (or on it) - the shop is waiting.
+  bool isDue(DateTime today) => isOpen && neededBy != null && !neededBy!.isAfter(today);
+}
+
+/// A new block reservation (`material_reservations`).
+class ReservationDraft {
+  const ReservationDraft({
+    required this.projectId,
+    required this.itemId,
+    required this.componentId,
+    required this.quantity,
+    this.hullId,
+    this.neededBy,
+    this.notes,
+  });
+
+  final String projectId;
+  final String? itemId;
+  final String? componentId;
+  final String? hullId;
+  final double quantity;
+  final DateTime? neededBy;
+  final String? notes;
+
+  ReservationDraft copyWith({double? quantity}) => ReservationDraft(
+    projectId: projectId,
+    itemId: itemId,
+    componentId: componentId,
+    hullId: hullId,
+    quantity: quantity ?? this.quantity,
+    neededBy: neededBy,
+    notes: notes,
+  );
+
+  /// Problems; empty when the draft can be saved. [openItemIds] are the items
+  /// the block already has an open reservation for (one per item and block).
+  List<String> validationErrors({Iterable<String> openItemIds = const []}) => [
+    if (itemId == null) 'Choose a stock item.',
+    if (componentId == null) 'Choose a block.',
+    if (!quantity.isFinite || quantity <= 0) 'Enter a quantity above 0.',
+    if (itemId != null && openItemIds.contains(itemId))
+      'The block already has an open reservation of this item - change its quantity instead.',
+  ];
+}

@@ -13,6 +13,7 @@ import '../../providers/shipyard_providers.dart';
 import '../production/activity_form_dialog.dart' show yardAreas;
 import '../scene_actions.dart';
 import 'material_dialog.dart';
+import 'steel_reservation_dialog.dart';
 
 /// Hull filter value for items without a hull.
 const _generalStock = '__general__';
@@ -76,7 +77,13 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
                 TextField(
                   controller: reserved,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(labelText: 'Reserved (${item.unit})'),
+                  decoration: InputDecoration(
+                    labelText: 'Reserved, manual (${item.unit})',
+                    helperText: item.blockReserved > 0
+                        ? '+ ${_fmt(item.blockReserved)} ${item.unit} reserved for blocks (from the block reservations)'
+                        : 'Block reservations are added on top (Blocks → tap a block).',
+                    helperMaxLines: 2,
+                  ),
                 ),
                 if (error != null)
                   Padding(padding: const EdgeInsets.only(top: 10), child: Text(error!, style: const TextStyle(color: Color(0xFFFCA5A5)))),
@@ -133,6 +140,17 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
     );
   }
 
+  Future<void> _reserveSteel(List<Hull> hulls) async {
+    final summary = await SteelReservationDialog.show(
+      context,
+      projectId: widget.projectId,
+      hulls: hulls,
+      initialHullId: _hullFilter == _generalStock ? null : _hullFilter,
+    );
+    if (summary == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(summary)));
+  }
+
   Widget _hullMenu(List<Hull> hulls) {
     final label = switch (_hullFilter) {
       null => 'All hulls',
@@ -163,6 +181,12 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
     final hullNos = {for (final h in hulls) h.id: h.hullNo};
     final byId = componentsById(components);
     final canEdit = ref.watch(isEditorProvider);
+    final reservations = ref.watch(reservationsProvider(widget.projectId)).value ?? const <MaterialReservation>[];
+    // Blocks with an open reservation, per item.
+    final blocksByItem = <String, Set<String>>{};
+    for (final r in reservations.where((r) => r.isOpen)) {
+      (blocksByItem[r.itemId] ??= {}).add(r.componentId);
+    }
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -227,6 +251,16 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
                         if (canEdit)
                           Padding(
                             padding: const EdgeInsets.only(left: 6),
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                              onPressed: () => _reserveSteel(hulls),
+                              icon: const Icon(Icons.view_in_ar_outlined, size: 18),
+                              label: const Text('Reserve steel'),
+                            ),
+                          ),
+                        if (canEdit)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 6),
                             child: FilledButton.tonalIcon(
                               style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
                               onPressed: () => _openItem(items: list, hulls: hulls, components: components),
@@ -260,6 +294,7 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
                           subtitle: Text(
                             [
                               if (item.hullId != null) 'for ${hullNos[item.hullId] ?? 'hull'}',
+                              if (blocksByItem[item.id] case final b?) '${b.length} block${b.length == 1 ? '' : 's'}',
                               if (item.grade != null) item.grade!,
                               if (item.dimensions != null) item.dimensions!,
                               if (item.heatNumber != null) 'heat ${item.heatNumber}',
@@ -279,7 +314,7 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
                                     Text('${_fmt(item.available)} ${item.unit} free', style: TextStyle(fontSize: 12.5, color: color, fontWeight: FontWeight.w700)),
-                                    Text('${_fmt(item.onHand)} on hand · ${_fmt(item.reserved)} reserved', style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted)),
+                                    Text('${_fmt(item.onHand)} on hand · ${_fmt(item.totalReserved)} reserved', style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted)),
                                   ],
                                 ),
                                 if (loc != null)

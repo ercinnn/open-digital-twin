@@ -348,6 +348,58 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
     }
   }
 
+  // ---- Block material reservations ----------------------------------------------
+  @override
+  Future<List<MaterialReservation>> fetchReservations(String projectId) async {
+    final rows = await supabase
+        .from('material_reservations')
+        .select()
+        .eq('project_id', projectId)
+        .order('needed_by', ascending: true, nullsFirst: false);
+    return rows.map(ReservationModel.fromJson).toList();
+  }
+
+  @override
+  Future<void> createReservations(List<ReservationDraft> drafts) async {
+    if (drafts.isEmpty) return;
+    await _saveReservation(
+      () => supabase.from('material_reservations').insert([for (final d in drafts) ReservationModel.insert(d)]),
+    );
+  }
+
+  @override
+  Future<void> updateReservation(String reservationId, {required double quantity, DateTime? neededBy}) =>
+      _saveReservation(
+        () => supabase
+            .from('material_reservations')
+            .update({'quantity': quantity, 'needed_by': writeDate(neededBy)})
+            .eq('id', reservationId),
+      );
+
+  @override
+  Future<void> issueReservation(String reservationId) => _saveReservation(
+    () => supabase.from('material_reservations').update({'status': ReservationStatus.issued.dbValue}).eq('id', reservationId),
+  );
+
+  @override
+  Future<void> deleteReservation(String reservationId) =>
+      _saveReservation(() => supabase.from('material_reservations').delete().eq('id', reservationId));
+
+  Future<void> _saveReservation(Future<void> Function() write) async {
+    try {
+      await write();
+    } on PostgrestException catch (e) {
+      if (e.code == '23505') {
+        throw const ShipyardException(
+          'A block already has an open reservation of this item - change its quantity instead.',
+        );
+      }
+      _rethrow(e);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
   // ---- Quality ------------------------------------------------------------------
   @override
   Future<List<QualityInspection>> fetchInspections(String projectId) async {

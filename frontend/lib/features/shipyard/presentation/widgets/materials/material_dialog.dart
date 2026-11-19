@@ -253,12 +253,13 @@ class _MaterialItemDialogState extends ConsumerState<MaterialItemDialog> {
                   onChanged: enabled ? (v) => setState(() => _unit = v ?? _unit) : null,
                 ),
                 _text(_onHand, 'On hand', number: true),
-                _text(_reserved, 'Reserved', number: true),
+                _text(_reserved, 'Reserved (manual)', number: true),
                 _text(_reorder, 'Reorder level', number: true),
               ]),
-              const Text(
-                'Free stock = on hand − reserved. Below the reorder level the item is "low", '
-                'below zero a "shortage" (to be ordered).',
+              Text(
+                'Free stock = on hand − reserved (manual) − reserved for blocks'
+                '${(_initial?.blockReserved ?? 0) > 0 ? ' (${_numberText(_initial!.blockReserved)} $_unit, from the block reservations)' : ''}. '
+                'Below the reorder level the item is "low", below zero a "shortage" (to be ordered).',
                 style: TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
               ),
               _section('WHERE & FOR WHOM'),

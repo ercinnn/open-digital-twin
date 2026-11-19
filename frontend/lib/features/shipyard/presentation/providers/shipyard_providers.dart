@@ -138,7 +138,13 @@ final materialsProvider = FutureProvider.autoDispose.family<List<MaterialItem>, 
   return ref.watch(shipyardRepositoryProvider).fetchMaterials(projectId);
 });
 
-final recentTagsProvider = FutureProvider.autoDispose.family<List<String>, String>((ref, projectId) {
+/// Block material reservations (012). Invalidate together with [materialsProvider]
+/// after a change: the database updates the item totals.
+final reservationsProvider = FutureProvider.autoDispose.family<List<MaterialReservation>, String>((ref, projectId) {
+  return ref.watch(shipyardRepositoryProvider).fetchReservations(projectId);
+});
+
+final recentTagsProvider =FutureProvider.autoDispose.family<List<String>, String>((ref, projectId) {
   return ref.watch(shipyardRepositoryProvider).fetchRecentTags(projectId);
 });
 

@@ -6,12 +6,14 @@ import '../../../../../core/theme/app_theme.dart';
 import '../../../../digital_twin/domain/entities/twin_entities.dart';
 import '../../../../digital_twin/presentation/providers/twin_providers.dart';
 import '../../../domain/entities/block_entities.dart';
+import '../../../domain/entities/material_entities.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
 import '../../../domain/services/block_breakdown.dart';
 import '../../../domain/services/block_weights.dart';
 import '../../../domain/services/lift_plan.dart';
 import '../../providers/shipyard_providers.dart';
+import '../materials/block_materials_dialog.dart';
 
 /// Block list of a hull: shows the existing blocks (delete; edit names and
 /// weights) and adds new ones from the block type catalogue. The user enters
@@ -369,8 +371,8 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
       builder: (context) => AlertDialog(
         title: Text('Delete block ${block.blockNo}?'),
         content: const Text(
-          'Its schedule rows are deleted as well. Bookings, inspections, punch items and permits '
-          'linked to the block stay, without the link.',
+          'Its schedule rows and material reservations are deleted as well (reserved stock becomes free). '
+          'Bookings, inspections, punch items and permits linked to the block stay, without the link.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
@@ -385,6 +387,8 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
     });
     try {
       await ref.read(shipyardRepositoryProvider).deleteBlock(block.componentId);
+      ref.invalidate(reservationsProvider(widget.projectId));
+      ref.invalidate(materialsProvider(widget.projectId));
     } on ShipyardException catch (e) {
       if (mounted) setState(() => _errors = [e.message]);
     } finally {
@@ -398,6 +402,10 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
     // Kept alive for the lift update after saving weights.
     ref.watch(activitiesProvider(widget.projectId));
     ref.watch(bookingsProvider(widget.projectId));
+    final reserved = {
+      for (final r in ref.watch(reservationsProvider(widget.projectId)).value ?? const <MaterialReservation>[])
+        if (r.isOpen) r.componentId,
+    };
     final hull = _hull;
     final existing = hull == null ? const <HullBlock>[] : blocksOfHull(components, hull.hullNo);
     final generated = hull == null || _editing ? const <BlockDraft>[] : _generated(hull, existing);
@@ -483,10 +491,21 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
                         children: [
                           for (final b in existing)
                             Tooltip(
-                              message: b.name,
+                              message: '${b.name}\nTap for its materials',
                               child: InputChip(
                                 label: Text(b.blockNo),
                                 visualDensity: VisualDensity.compact,
+                                avatar: reserved.contains(b.componentId)
+                                    ? const Icon(Icons.inventory_2_outlined, size: 14, color: AppTheme.accent)
+                                    : null,
+                                onPressed: _saving || _deletingId != null
+                                    ? null
+                                    : () => BlockMaterialsDialog.show(
+                                        context,
+                                        projectId: widget.projectId,
+                                        block: b,
+                                        hullId: hull?.id,
+                                      ),
                                 onDeleted: _saving || _deletingId != null ? null : () => _delete(b),
                                 deleteIcon: _deletingId == b.componentId
                                     ? const SizedBox(

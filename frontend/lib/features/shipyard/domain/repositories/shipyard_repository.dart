@@ -106,6 +106,21 @@ abstract interface class ShipyardRepository {
   /// Updates all fields of a stock item (editors).
   Future<void> updateMaterialItem(String itemId, MaterialDraft draft);
 
+  // ---- Block material reservations (012) ---------------------------------------
+  Future<List<MaterialReservation>> fetchReservations(String projectId);
+
+  /// Reserves stock for blocks in one request (the database keeps the item totals).
+  Future<void> createReservations(List<ReservationDraft> drafts);
+
+  /// Changes quantity / needed-by date of an open reservation.
+  Future<void> updateReservation(String reservationId, {required double quantity, DateTime? neededBy});
+
+  /// Hands the material out to the block: stock on hand goes down and a trace
+  /// event `issued` is recorded (database). Fails when not enough is on hand.
+  Future<void> issueReservation(String reservationId);
+
+  Future<void> deleteReservation(String reservationId);
+
   // ---- Quality (009) ----------------------------------------------------------
   Future<List<QualityInspection>> fetchInspections(String projectId);
 
