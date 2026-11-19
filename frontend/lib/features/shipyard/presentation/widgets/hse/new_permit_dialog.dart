@@ -10,7 +10,9 @@ import '../../providers/shipyard_providers.dart';
 
 /// Requests a permit-to-work (editors). The permit starts as "requested"; approval
 /// and activation (gas test for hot work / confined space) follow in its details.
-/// Returns true when saved.
+/// From a block, the request is prefilled for one schedule row ([activity]: type,
+/// window, description); zone warnings then follow the area the block is in
+/// ([zoneComponentId]). Returns true when saved.
 class NewPermitDialog extends ConsumerStatefulWidget {
   const NewPermitDialog({
     super.key,
@@ -21,6 +23,12 @@ class NewPermitDialog extends ConsumerStatefulWidget {
     required this.existing,
     this.initialComponentId,
     this.initialHullId,
+    this.activity,
+    this.initialType,
+    this.initialDescription,
+    this.initialFrom,
+    this.initialHours,
+    this.zoneComponentId,
   });
 
   final String projectId;
@@ -33,6 +41,16 @@ class NewPermitDialog extends ConsumerStatefulWidget {
   final String? initialComponentId;
   final String? initialHullId;
 
+  /// Schedule row the permit covers (`work_permits.activity_id`).
+  final ProductionActivity? activity;
+  final PermitType? initialType;
+  final String? initialDescription;
+  final DateTime? initialFrom;
+  final int? initialHours;
+
+  /// Area whose HSE zones apply besides the chosen component (e.g. the hall a block is in).
+  final String? zoneComponentId;
+
   static Future<bool?> show(
     BuildContext context, {
     required String projectId,
@@ -42,6 +60,12 @@ class NewPermitDialog extends ConsumerStatefulWidget {
     required List<WorkPermit> existing,
     String? initialComponentId,
     String? initialHullId,
+    ProductionActivity? activity,
+    PermitType? initialType,
+    String? initialDescription,
+    DateTime? initialFrom,
+    int? initialHours,
+    String? zoneComponentId,
   }) {
     return showDialog<bool>(
       context: context,
@@ -54,6 +78,12 @@ class NewPermitDialog extends ConsumerStatefulWidget {
         existing: existing,
         initialComponentId: initialComponentId,
         initialHullId: initialHullId,
+        activity: activity,
+        initialType: initialType,
+        initialDescription: initialDescription,
+        initialFrom: initialFrom,
+        initialHours: initialHours,
+        zoneComponentId: zoneComponentId,
       ),
     );
   }
@@ -63,25 +93,27 @@ class NewPermitDialog extends ConsumerStatefulWidget {
 }
 
 class _NewPermitDialogState extends ConsumerState<NewPermitDialog> {
-  static const _durations = [2, 4, 6, 8, 10, 12, 24];
+  late final List<int> _durations = {2, 4, 6, 8, 10, 12, 24, ?widget.initialHours}.toList()..sort();
 
-  PermitType _type = PermitType.hotWork;
+  late PermitType _type = widget.initialType ?? PermitType.hotWork;
   late String? _componentId = widget.initialComponentId;
   late String? _hullId = widget.initialHullId ?? _hullOf(widget.initialComponentId);
   late final _permitNo = TextEditingController(
     text: nextPermitNumber(widget.existing.map((p) => p.permitNo), DateTime.now()),
   );
-  final _description = TextEditingController();
+  late final _description = TextEditingController(text: widget.initialDescription ?? '');
   final _issuedTo = TextEditingController();
   late final _precautions = TextEditingController(text: permitPrecautions[_type]);
   bool _precautionsEdited = false;
 
   /// Next full hour; a shift permit of 8 h by default.
-  late DateTime _from = () {
-    final n = DateTime.now();
-    return DateTime(n.year, n.month, n.day, n.hour + 1);
-  }();
-  int _hours = 8;
+  late DateTime _from =
+      widget.initialFrom ??
+      () {
+        final n = DateTime.now();
+        return DateTime(n.year, n.month, n.day, n.hour + 1);
+      }();
+  late int _hours = widget.initialHours ?? 8;
   bool _saving = false;
   List<String> _errors = const [];
 
@@ -124,6 +156,7 @@ class _NewPermitDialogState extends ConsumerState<NewPermitDialog> {
       projectId: widget.projectId,
       componentId: _componentId,
       hullId: _hullId,
+      activityId: widget.activity?.id,
       permitNo: _permitNo.text,
       type: _type,
       description: _description.text,
@@ -158,7 +191,12 @@ class _NewPermitDialogState extends ConsumerState<NewPermitDialog> {
   Widget build(BuildContext context) {
     final enabled = !_saving;
     final components = [...widget.components]..sort((a, b) => a.name.compareTo(b.name));
-    final warnings = permitZoneWarnings(_type, _componentId, widget.zones);
+    final warnings = [
+      ...permitZoneWarnings(_type, _componentId, widget.zones),
+      if (widget.zoneComponentId != null && widget.zoneComponentId != _componentId)
+        ...permitZoneWarnings(_type, widget.zoneComponentId, widget.zones),
+    ]..sort((a, b) => (b.conflict ? 1 : 0) - (a.conflict ? 1 : 0));
+    final activity = widget.activity;
     return AlertDialog(
       title: const Text('Request work permit'),
       content: SizedBox(
@@ -168,6 +206,14 @@ class _NewPermitDialogState extends ConsumerState<NewPermitDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (activity != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    'For ${activity.name} (${formatDate(activity.plannedStart)} → ${formatDate(activity.plannedEnd)})',
+                    style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+                  ),
+                ),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -212,7 +258,7 @@ class _NewPermitDialogState extends ConsumerState<NewPermitDialog> {
                         for (final c in components)
                           DropdownMenuItem<String?>(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis)),
                       ],
-                      onChanged: enabled
+                      onChanged: enabled && activity == null
                           ? (v) => setState(() {
                               _componentId = v;
                               _hullId = _hullOf(v) ?? _hullId;
@@ -316,6 +362,14 @@ class _NewPermitDialogState extends ConsumerState<NewPermitDialog> {
                 onChanged: (_) => _precautionsEdited = true,
                 decoration: const InputDecoration(labelText: 'Precautions'),
               ),
+              if (_type == PermitType.lifting && activity?.stage == ProductionStage.erection)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text(
+                    'Activation needs a crane lift of this erection booked inside the permit window (database rule).',
+                    style: TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                  ),
+                ),
               if (_type.needsGasTest)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),

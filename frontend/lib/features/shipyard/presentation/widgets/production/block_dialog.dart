@@ -3,15 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/theme/app_theme.dart';
 import '../../../domain/entities/block_entities.dart';
+import '../../../domain/entities/hse_entities.dart';
 import '../../../domain/entities/material_entities.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/entities/quality_entities.dart';
+import '../../../domain/services/permit_plan.dart';
 import '../../providers/shipyard_providers.dart';
+import '../hse/block_permits_panel.dart';
 import '../materials/block_materials_panel.dart';
 import '../quality/block_inspections_panel.dart';
 
 /// Everything linked to one hull block, one tab per module: material
-/// reservations and ITP inspections.
+/// reservations, ITP inspections and permits-to-work.
 class BlockDialog extends ConsumerWidget {
   const BlockDialog({super.key, required this.projectId, required this.block, required this.hull, this.initialTab = 0});
 
@@ -19,7 +22,7 @@ class BlockDialog extends ConsumerWidget {
   final HullBlock block;
   final Hull? hull;
 
-  /// 0 = materials, 1 = inspections.
+  /// 0 = materials, 1 = inspections, 2 = permits.
   final int initialTab;
 
   static Future<void> show(
@@ -44,6 +47,15 @@ class BlockDialog extends ConsumerWidget {
         .where((q) => q.componentId == block.componentId)
         .toList();
     final openHolds = inspections.where((q) => q.isOpenHold).length;
+    final now = DateTime.now();
+    final permits = ref.watch(permitsProvider(projectId)).value ?? const <WorkPermit>[];
+    final livePermits = permits.where((p) => p.componentId == block.componentId && p.isLive(now)).length;
+    final missingPermits = PermitPlan.forBlock(
+      block: block,
+      activities: ref.watch(activitiesProvider(projectId)).value ?? const <ProductionActivity>[],
+      permits: permits,
+      now: now,
+    ).where((n) => !n.covered).length;
     final weight = block.weightKg;
     final size = MediaQuery.sizeOf(context);
 
@@ -66,14 +78,15 @@ class BlockDialog extends ConsumerWidget {
         width: 760,
         height: (size.height * 0.6).clamp(320.0, 620.0),
         child: DefaultTabController(
-          length: 2,
-          initialIndex: initialTab.clamp(0, 1),
+          length: 3,
+          initialIndex: initialTab.clamp(0, 2),
           child: Column(
             children: [
               TabBar(
                 tabs: [
                   Tab(text: 'Materials (${reservations.where((r) => r.isOpen).length} open)'),
                   Tab(text: 'Inspections (${inspections.length}${openHolds == 0 ? '' : ', $openHolds H open'})'),
+                  Tab(text: 'Permits ($livePermits live${missingPermits == 0 ? '' : ', $missingPermits missing'})'),
                 ],
               ),
               Expanded(
@@ -81,6 +94,7 @@ class BlockDialog extends ConsumerWidget {
                   children: [
                     BlockMaterialsPanel(projectId: projectId, block: block, hullId: hull?.id),
                     BlockInspectionsPanel(projectId: projectId, block: block, hull: hull),
+                    BlockPermitsPanel(projectId: projectId, block: block, hull: hull),
                   ],
                 ),
               ),

@@ -101,6 +101,15 @@ class _PermitDialogState extends ConsumerState<PermitDialog> {
               Text(p.description, style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               _kv('Location', widget.component?.name ?? '—'),
+              if (p.activityId != null)
+                _kv(
+                  'For',
+                  (ref.watch(activitiesProvider(widget.component?.projectId ?? '')).value ?? const [])
+                          .where((a) => a.id == p.activityId)
+                          .firstOrNull
+                          ?.name ??
+                      'schedule row',
+                ),
               _kv('Valid', '${formatDateTime(p.validFrom)} → ${formatDateTime(p.validTo)}'),
               if (p.status == PermitStatus.active) _kv('Remaining', formatRemaining(p.remaining(now))),
               if (p.issuedTo != null) _kv('Issued to', p.issuedTo!),

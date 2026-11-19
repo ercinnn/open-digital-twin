@@ -52,6 +52,7 @@ class WorkPermit {
     required this.validTo,
     required this.position,
     this.hullId,
+    this.activityId,
     this.issuedTo,
     this.gasO2,
     this.gasLel,
@@ -62,6 +63,9 @@ class WorkPermit {
   final String id;
   final String componentId;
   final String? hullId;
+
+  /// Schedule row the permit covers (null = general permit at the location).
+  final String? activityId;
   final String permitNo;
   final PermitType type;
   final String description;
@@ -79,6 +83,9 @@ class WorkPermit {
   bool isLive(DateTime now) => status == PermitStatus.active && !now.isBefore(validFrom) && now.isBefore(validTo);
 
   bool isExpired(DateTime now) => status == PermitStatus.active && !now.isBefore(validTo);
+
+  /// Not closed and not over yet: it still covers (or will cover) its work.
+  bool isCurrent(DateTime now) => status != PermitStatus.closed && now.isBefore(validTo);
 
   Duration remaining(DateTime now) => validTo.difference(now);
 }
@@ -105,11 +112,15 @@ class PermitDraft {
     required this.validFrom,
     required this.validTo,
     this.hullId,
+    this.activityId,
     this.issuedTo,
     this.precautions,
   });
 
   final String projectId;
+
+  /// Schedule row the permit covers (must be a row of the same block).
+  final String? activityId;
 
   /// Block or yard area the work takes place at (required by the table).
   final String? componentId;
