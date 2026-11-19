@@ -57,6 +57,8 @@ class QualityInspection {
     required this.inspectedAt,
     required this.position,
     this.hullId,
+    this.activityId,
+    this.holdPoint = false,
     this.description,
     this.measuredValue,
     this.unit,
@@ -70,6 +72,12 @@ class QualityInspection {
   final String id;
   final String componentId;
   final String? hullId;
+
+  /// Schedule row of the ITP point (null = planned by hand).
+  final String? activityId;
+
+  /// ITP hold point: the schedule row cannot be finished before it passes.
+  final bool holdPoint;
   final InspectionType type;
   final String referenceNo;
   final String? description;
@@ -83,6 +91,12 @@ class QualityInspection {
   final DateTime inspectedAt;
   final MarkerPosition position;
   final String? notes;
+
+  /// Accepted: the work may go on.
+  bool get isAccepted => result == InspectionResult.pass || result == InspectionResult.conditional;
+
+  /// Hold point that still stops its schedule row from being finished.
+  bool get isOpenHold => holdPoint && !isAccepted;
 
   String? get acceptanceText {
     if (acceptanceMin == null && acceptanceMax == null) return null;
@@ -131,6 +145,8 @@ class InspectionDraft {
     required this.referenceNo,
     required this.plannedAt,
     this.hullId,
+    this.activityId,
+    this.holdPoint = false,
     this.description,
     this.unit,
     this.acceptanceMin,
@@ -145,6 +161,10 @@ class InspectionDraft {
   /// Block or yard area the inspection is pinned to (required by the table).
   final String? componentId;
   final String? hullId;
+
+  /// Schedule row of the ITP point.
+  final String? activityId;
+  final bool holdPoint;
   final InspectionType type;
   final String referenceNo;
   final String? description;

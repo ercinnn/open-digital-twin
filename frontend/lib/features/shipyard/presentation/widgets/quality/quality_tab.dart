@@ -241,7 +241,7 @@ class _QualityTabState extends ConsumerState<QualityTab> {
                         leading: Icon(Icons.fact_check_outlined, color: q.result.color, size: 20),
                         title: Text('${q.type.label} · ${q.description ?? q.referenceNo}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5)),
                         subtitle: Text(
-                          '${q.referenceNo} · ${shortComponentName(c)}'
+                          '${q.referenceNo}${q.holdPoint ? ' · H' : ''} · ${shortComponentName(c)}'
                           '${q.measuredValue == null ? '' : ' · ${q.measuredValue} ${q.unit ?? ''}'}'
                           '${q.acceptanceText == null ? '' : ' (${q.acceptanceText})'}',
                           style: const TextStyle(fontSize: 11),

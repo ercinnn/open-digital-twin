@@ -85,10 +85,15 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
 
   @override
   Future<void> updateActivityProgress(ProductionActivity activity) async {
-    await supabase
-        .from('production_activities')
-        .update(ProductionActivityModel.progressUpdate(activity))
-        .eq('id', activity.id);
+    try {
+      await supabase
+          .from('production_activities')
+          .update(ProductionActivityModel.progressUpdate(activity))
+          .eq('id', activity.id);
+    } catch (e) {
+      // e.g. an open ITP hold point (migration 013) when the row is reported finished.
+      _rethrow(e);
+    }
   }
 
   @override

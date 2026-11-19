@@ -286,7 +286,8 @@ class _NewInspectionDialogState extends ConsumerState<NewInspectionDialog> {
 }
 
 /// Drafts an inspection & test plan of a hull from its schedule rows (preview, then insert).
-/// Offered for hulls with schedule rows and without inspections. Returns the hull id when created.
+/// Offered for hulls with schedule rows that still have unplanned inspection points
+/// (rows added later get theirs on a second draft). Returns the hull id when created.
 class DraftInspectionPlanDialog extends ConsumerStatefulWidget {
   const DraftInspectionPlanDialog({
     super.key,
@@ -329,9 +330,7 @@ class DraftInspectionPlanDialog extends ConsumerStatefulWidget {
 }
 
 class _DraftInspectionPlanDialogState extends ConsumerState<DraftInspectionPlanDialog> {
-  late final List<Hull> _candidates = widget.hulls
-      .where((h) => widget.activities.any((a) => a.hullId == h.id) && !widget.existing.any((q) => q.hullId == h.id))
-      .toList();
+  late final List<Hull> _candidates = widget.hulls.where((h) => _draftsFor(h).isNotEmpty).toList();
   late String? _hullId = _candidates.any((h) => h.id == widget.initialHullId)
       ? widget.initialHullId
       : _candidates.firstOrNull?.id;
@@ -340,7 +339,10 @@ class _DraftInspectionPlanDialogState extends ConsumerState<DraftInspectionPlanD
 
   List<InspectionDraft> _drafts() {
     final hull = _candidates.where((h) => h.id == _hullId).firstOrNull;
-    if (hull == null) return const [];
+    return hull == null ? const [] : _draftsFor(hull);
+  }
+
+  List<InspectionDraft> _draftsFor(Hull hull) {
     final byNode = {for (final c in widget.components) c.meshNodeId: c.id};
     return InspectionPlan.fromSchedule(
       hull: hull,
@@ -349,6 +351,7 @@ class _DraftInspectionPlanDialogState extends ConsumerState<DraftInspectionPlanD
       // Work outside the yard (sea trials) is pinned to the hull's berth, else the quay.
       fallbackComponentId: byNode[hull.locationNodeId] ?? byNode['NODE_A19_OUTFITTING_QUAY'],
       existingReferences: widget.existing.map((q) => q.referenceNo),
+      existing: widget.existing,
     );
   }
 
@@ -382,7 +385,7 @@ class _DraftInspectionPlanDialogState extends ConsumerState<DraftInspectionPlanD
         width: 720,
         child: _candidates.isEmpty
             ? const Text(
-                'No hull qualifies: a draft needs a hull with schedule rows and without inspections. '
+                'No hull qualifies: every inspection point of the schedule rows is planned already. '
                 'Plan single inspections instead.',
               )
             : SingleChildScrollView(
@@ -395,7 +398,7 @@ class _DraftInspectionPlanDialogState extends ConsumerState<DraftInspectionPlanD
                       isExpanded: true,
                       decoration: const InputDecoration(
                         labelText: 'Hull',
-                        helperText: 'Hulls with a schedule and no inspections yet.',
+                        helperText: 'Hulls with schedule rows whose inspection points are not planned yet.',
                       ),
                       items: [
                         for (final h in _candidates)
@@ -408,8 +411,9 @@ class _DraftInspectionPlanDialogState extends ConsumerState<DraftInspectionPlanD
                       const Text('The schedule of this hull has no stages with inspection points.')
                     else ...[
                       Text(
-                        '${drafts.length} inspections (result "pending"), planned on the last day of each '
-                        'activity. Every one can be recorded or deleted afterwards.',
+                        '${drafts.length} inspections (result "pending", ${drafts.where((d) => d.holdPoint).length} '
+                        'hold points H), planned on the last day of each activity. A row with an open hold point '
+                        'cannot be reported finished. Every one can be recorded or deleted afterwards.',
                         style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
                       ),
                       const SizedBox(height: 8),
@@ -426,7 +430,7 @@ class _DraftInspectionPlanDialogState extends ConsumerState<DraftInspectionPlanD
                         children: [
                           const TableRow(
                             children: [
-                              Padding(padding: EdgeInsets.only(bottom: 4), child: Text('REFERENCE', style: head)),
+                              Padding(padding: EdgeInsets.only(bottom: 4), child: Text('REFERENCE · H', style: head)),
                               Text('TYPE', style: head),
                               Text('DESCRIPTION', style: head),
                               Text('WHERE', style: head),
@@ -440,7 +444,7 @@ class _DraftInspectionPlanDialogState extends ConsumerState<DraftInspectionPlanD
                               children: [
                                 Padding(
                                   padding: const EdgeInsets.symmetric(vertical: 5),
-                                  child: Text(d.referenceNo, style: cell),
+                                  child: Text('${d.referenceNo}${d.holdPoint ? ' · H' : ''}', style: cell),
                                 ),
                                 Text(d.type.label, style: cell),
                                 Text(d.description ?? '', style: cell, overflow: TextOverflow.ellipsis),

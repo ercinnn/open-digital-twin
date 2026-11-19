@@ -8,12 +8,13 @@ import '../../../../digital_twin/presentation/providers/twin_providers.dart';
 import '../../../domain/entities/block_entities.dart';
 import '../../../domain/entities/material_entities.dart';
 import '../../../domain/entities/production_entities.dart';
+import '../../../domain/entities/quality_entities.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
 import '../../../domain/services/block_breakdown.dart';
 import '../../../domain/services/block_weights.dart';
 import '../../../domain/services/lift_plan.dart';
 import '../../providers/shipyard_providers.dart';
-import '../materials/block_materials_dialog.dart';
+import 'block_dialog.dart';
 
 /// Block list of a hull: shows the existing blocks (delete; edit names and
 /// weights) and adds new ones from the block type catalogue. The user enters
@@ -406,6 +407,15 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
       for (final r in ref.watch(reservationsProvider(widget.projectId)).value ?? const <MaterialReservation>[])
         if (r.isOpen) r.componentId,
     };
+    final inspections = ref.watch(inspectionsProvider(widget.projectId)).value ?? const <QualityInspection>[];
+    final failed = {
+      for (final q in inspections)
+        if (q.result == InspectionResult.fail) q.componentId,
+    };
+    final openHold = {
+      for (final q in inspections)
+        if (q.isOpenHold) q.componentId,
+    };
     final hull = _hull;
     final existing = hull == null ? const <HullBlock>[] : blocksOfHull(components, hull.hullNo);
     final generated = hull == null || _editing ? const <BlockDraft>[] : _generated(hull, existing);
@@ -491,20 +501,24 @@ class _BlocksDialogState extends ConsumerState<BlocksDialog> {
                         children: [
                           for (final b in existing)
                             Tooltip(
-                              message: '${b.name}\nTap for its materials',
+                              message: '${b.name}\nTap for materials and inspections',
                               child: InputChip(
                                 label: Text(b.blockNo),
                                 visualDensity: VisualDensity.compact,
-                                avatar: reserved.contains(b.componentId)
+                                avatar: failed.contains(b.componentId)
+                                    ? const Icon(Icons.error_outline, size: 14, color: Color(0xFFEF4444))
+                                    : openHold.contains(b.componentId)
+                                    ? const Icon(Icons.pan_tool_outlined, size: 13, color: Color(0xFFF59E0B))
+                                    : reserved.contains(b.componentId)
                                     ? const Icon(Icons.inventory_2_outlined, size: 14, color: AppTheme.accent)
                                     : null,
                                 onPressed: _saving || _deletingId != null
                                     ? null
-                                    : () => BlockMaterialsDialog.show(
+                                    : () => BlockDialog.show(
                                         context,
                                         projectId: widget.projectId,
                                         block: b,
-                                        hullId: hull?.id,
+                                        hull: hull,
                                       ),
                                 onDeleted: _saving || _deletingId != null ? null : () => _delete(b),
                                 deleteIcon: _deletingId == b.componentId

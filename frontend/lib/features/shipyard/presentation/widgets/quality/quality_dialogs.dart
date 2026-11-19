@@ -288,6 +288,15 @@ class _InspectionDialogState extends ConsumerState<InspectionDialog> {
               if (q.description != null) Text(q.description!, style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               _kv('Location', widget.component?.name ?? '—'),
+              if (q.holdPoint)
+                _kv(
+                  'ITP point',
+                  q.isOpenHold
+                      ? 'Hold point (H) - its schedule row cannot be finished before this inspection passes'
+                      : 'Hold point (H) - released',
+                )
+              else if (q.activityId != null)
+                _kv('ITP point', 'Witness / review point'),
               _kv(planned ? 'Planned' : 'Inspected', formatDateTime(q.inspectedAt)),
               if (q.measuredValue != null) _kv('Measured', '${q.measuredValue} ${q.unit ?? ''}'),
               if (q.acceptanceText != null) _kv('Acceptance', q.acceptanceText!),

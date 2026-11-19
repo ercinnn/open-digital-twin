@@ -110,6 +110,142 @@ void main() {
     });
   });
 
+  group('ITP hold points and repeated drafts', () {
+    final plan = InspectionPlan.fromSchedule(
+      hull: hull,
+      activities: activities,
+      componentIdByNode: nodes,
+      fallbackComponentId: 'c-quay',
+    );
+
+    test('every point is linked to its schedule row; hold points where work would hide defects', () {
+      final byId = {for (final a in activities) a.id: a};
+      expect(plan.every((d) => byId.containsKey(d.activityId)), isTrue);
+      final holds = plan.where((d) => d.holdPoint).map((d) => byId[d.activityId]!.stage).toList();
+      expect(holds, [
+        ProductionStage.blockAssembly,
+        ProductionStage.blockAssembly,
+        ProductionStage.blastingPainting,
+        ProductionStage.launching,
+        ProductionStage.outfitting,
+        ProductionStage.commissioning,
+      ]);
+      expect(plan.firstWhere((d) => d.type == InspectionType.ndtRt).holdPoint, isFalse);
+      expect(InspectionPlan.hasPoints(ProductionStage.cutting), isTrue);
+      expect(InspectionPlan.hasPoints(ProductionStage.delivery), isFalse);
+    });
+
+    test('points already planned for a row are skipped, so the draft can be repeated', () {
+      final existing = [
+        for (final (i, d) in plan.take(5).indexed)
+          QualityInspection(
+            id: 'q$i',
+            componentId: d.componentId!,
+            activityId: d.activityId,
+            type: d.type,
+            referenceNo: d.referenceNo,
+            result: InspectionResult.pending,
+            inspectedAt: d.plannedAt,
+            position: MarkerPosition.top,
+          ),
+      ];
+      final again = InspectionPlan.fromSchedule(
+        hull: hull,
+        activities: activities,
+        componentIdByNode: nodes,
+        fallbackComponentId: 'c-quay',
+        existing: existing,
+        existingReferences: existing.map((q) => q.referenceNo),
+      );
+      expect(again, hasLength(plan.length - 5));
+      expect(again.first.referenceNo, 'QI-1004-0006');
+      final all = InspectionPlan.fromSchedule(
+        hull: hull,
+        activities: activities,
+        componentIdByNode: nodes,
+        fallbackComponentId: 'c-quay',
+        existing: [
+          for (final (i, d) in plan.indexed)
+            QualityInspection(
+              id: 'q$i',
+              componentId: d.componentId!,
+              activityId: d.activityId,
+              type: d.type,
+              referenceNo: d.referenceNo,
+              result: InspectionResult.pass,
+              inspectedAt: d.plannedAt,
+              position: MarkerPosition.top,
+            ),
+        ],
+      );
+      expect(all, isEmpty);
+    });
+
+    test('a block draft takes only the rows of that block and pins to the block', () {
+      ProductionActivity row(String id, String block, ProductionStage stage, int day) => ProductionActivity(
+        id: id,
+        projectId: 'p',
+        hullId: 'h4',
+        componentId: block,
+        code: id,
+        name: id,
+        stage: stage,
+        locationNodeId: 'NODE_A08_BLOCK_ASSEMBLY_HALL',
+        plannedStart: DateTime(2027, 2, day),
+        plannedEnd: DateTime(2027, 2, day + 3),
+        progressPct: 0,
+        sortOrder: day,
+      );
+      final rows = [
+        row('b1-asm', 'b1', ProductionStage.blockAssembly, 1),
+        row('b1-pnt', 'b1', ProductionStage.blastingPainting, 5),
+        row('b2-asm', 'b2', ProductionStage.blockAssembly, 1),
+      ];
+      final d = InspectionPlan.fromSchedule(hull: hull, activities: rows, componentIdByNode: nodes, componentId: 'b1');
+      expect(d.map((x) => (x.activityId, x.type, x.holdPoint)), [
+        ('b1-asm', InspectionType.dimensional, true),
+        ('b1-asm', InspectionType.ndtUt, true),
+        ('b1-pnt', InspectionType.coatingDft, true),
+      ]);
+      expect(d.every((x) => x.componentId == 'b1'), isTrue);
+    });
+
+    test('open hold point = hold point not yet pass / conditional', () {
+      QualityInspection q(InspectionResult r, {bool hold = true}) => QualityInspection(
+        id: 'q',
+        componentId: 'b1',
+        type: InspectionType.ndtUt,
+        referenceNo: 'QI-1',
+        result: r,
+        inspectedAt: today,
+        position: MarkerPosition.top,
+        holdPoint: hold,
+      );
+      expect(q(InspectionResult.pending).isOpenHold, isTrue);
+      expect(q(InspectionResult.fail).isOpenHold, isTrue);
+      expect(q(InspectionResult.pass).isOpenHold, isFalse);
+      expect(q(InspectionResult.conditional).isOpenHold, isFalse);
+      expect(q(InspectionResult.pending, hold: false).isOpenHold, isFalse);
+    });
+
+    test('insert row carries the schedule row and the hold flag', () {
+      final row = QualityInspectionModel.insert(plan.firstWhere((d) => d.holdPoint));
+      expect(row['hold_point'], isTrue);
+      expect(row['activity_id'], isNotNull);
+      final parsed = QualityInspectionModel.fromJson({
+        'id': 'q1',
+        'component_id': 'c1',
+        'inspection_type': 'ndt_ut',
+        'reference_no': 'QI-1004-0001',
+        'result': 'pending',
+        'inspected_at': '2027-03-01T10:00:00Z',
+        'activity_id': 'a1',
+        'hold_point': true,
+      });
+      expect((parsed.activityId, parsed.holdPoint), ('a1', true));
+    });
+  });
+
   group('InspectionDraft & rows', () {
     final draft = InspectionDraft(
       projectId: 'p',

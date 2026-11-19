@@ -14,32 +14,21 @@ String _qty(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStr
 
 double? _parse(String text) => double.tryParse(text.trim().replaceAll(',', '.'));
 
-/// Material reserved for one hull block: reserve stock items, change the
-/// quantity / needed-by date, issue to the shop (stock goes down) or delete.
-class BlockMaterialsDialog extends ConsumerStatefulWidget {
-  const BlockMaterialsDialog({super.key, required this.projectId, required this.block, this.hullId});
+/// Material reserved for one hull block (tab of the block dialog): reserve stock
+/// items, change the quantity / needed-by date, issue to the shop (stock goes
+/// down) or delete.
+class BlockMaterialsPanel extends ConsumerStatefulWidget {
+  const BlockMaterialsPanel({super.key, required this.projectId, required this.block, this.hullId});
 
   final String projectId;
   final HullBlock block;
   final String? hullId;
 
-  static Future<void> show(
-    BuildContext context, {
-    required String projectId,
-    required HullBlock block,
-    String? hullId,
-  }) {
-    return showDialog<void>(
-      context: context,
-      builder: (_) => BlockMaterialsDialog(projectId: projectId, block: block, hullId: hullId),
-    );
-  }
-
   @override
-  ConsumerState<BlockMaterialsDialog> createState() => _BlockMaterialsDialogState();
+  ConsumerState<BlockMaterialsPanel> createState() => _BlockMaterialsPanelState();
 }
 
-class _BlockMaterialsDialogState extends ConsumerState<BlockMaterialsDialog> {
+class _BlockMaterialsPanelState extends ConsumerState<BlockMaterialsPanel> {
   String? _itemId;
   final _quantity = TextEditingController();
   DateTime? _neededBy;
@@ -217,142 +206,133 @@ class _BlockMaterialsDialogState extends ConsumerState<BlockMaterialsDialog> {
     final busy = _busyId != null || _adding;
     final weight = widget.block.weightKg;
 
-    return AlertDialog(
-      title: Text('Materials · ${widget.block.blockNo}'),
-      content: SizedBox(
-        width: 720,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                [
-                  widget.block.name,
-                  if (weight != null && weight > 0) '${(weight / 1000).toStringAsFixed(1)} t steel',
-                  if (defaultNeededBy != null) 'first shop stage ${formatDate(defaultNeededBy)}',
-                ].join(' · '),
-                style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
-              ),
-              const SizedBox(height: 10),
-              if (reservations.isLoading && !reservations.hasValue)
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else if (reservations.hasError)
-                Text(
-                  'Could not load reservations: ${reservations.error}',
-                  style: const TextStyle(color: Color(0xFFFCA5A5)),
-                )
-              else if (mine.isEmpty)
-                const Text(
-                  'Nothing reserved for this block yet. Materials → "Reserve steel for blocks" drafts plates and '
-                  'profiles from the block weights; other items can be added below.',
-                  style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
-                )
-              else
-                for (final r in mine) _row(r, itemsById[r.itemId], canEdit, busy, today),
-              if (canEdit) ...[
-                const SizedBox(height: 14),
-                const Text(
-                  'RESERVE STOCK',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    letterSpacing: 0.8,
-                    color: AppTheme.textMuted,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 5,
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey('item-$_itemId'),
-                        initialValue: _itemId,
-                        isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Stock item'),
-                        items: [
-                          for (final i in [...items]..sort((a, b) => a.itemCode.compareTo(b.itemCode)))
-                            DropdownMenuItem(
-                              value: i.id,
-                              child: Text(
-                                '${i.itemCode} · ${i.description} (${_qty(i.available)} ${i.unit} free)',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: busy ? null : (v) => setState(() => _itemId = v),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 110,
-                      child: TextField(
-                        controller: _quantity,
-                        enabled: !busy,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        onChanged: (_) => setState(() {}),
-                        decoration: InputDecoration(labelText: 'Quantity', suffixText: selected?.unit),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 150,
-                      child: DateField(
-                        label: 'Needed by',
-                        value: _neededByTouched ? _neededBy : defaultNeededBy,
-                        initial: (_neededByTouched ? _neededBy : defaultNeededBy) ?? today,
-                        enabled: !busy,
-                        onChanged: (v) => setState(() {
-                          _neededBy = v;
-                          _neededByTouched = true;
-                        }),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: FilledButton.tonal(
-                        onPressed: busy ? null : () => _add(mine, defaultNeededBy),
-                        child: _adding
-                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Text('Reserve'),
-                      ),
-                    ),
-                  ],
-                ),
-                if (selected != null && (_parse(_quantity.text) ?? 0) > selected.available)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      'More than the free stock (${_qty(selected.available)} ${selected.unit}): '
-                      'the item becomes a shortage to order.',
-                      style: const TextStyle(fontSize: 12, color: Color(0xFFF59E0B)),
-                    ),
-                  ),
-              ],
-              if (_errors.isNotEmpty)
-                Container(
-                  margin: const EdgeInsets.only(top: 10),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: const Color(0xFF450A0A), borderRadius: BorderRadius.circular(8)),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (final l in _errors)
-                        Text('• $l', style: const TextStyle(color: Color(0xFFFCA5A5), fontSize: 12.5)),
-                    ],
-                  ),
-                ),
-            ],
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            [
+              widget.block.name,
+              if (weight != null && weight > 0) '${(weight / 1000).toStringAsFixed(1)} t steel',
+              if (defaultNeededBy != null) 'first shop stage ${formatDate(defaultNeededBy)}',
+            ].join(' · '),
+            style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
           ),
-        ),
+          const SizedBox(height: 10),
+          if (reservations.isLoading && !reservations.hasValue)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (reservations.hasError)
+            Text('Could not load reservations: ${reservations.error}', style: const TextStyle(color: Color(0xFFFCA5A5)))
+          else if (mine.isEmpty)
+            const Text(
+              'Nothing reserved for this block yet. Materials → "Reserve steel for blocks" drafts plates and '
+              'profiles from the block weights; other items can be added below.',
+              style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+            )
+          else
+            for (final r in mine) _row(r, itemsById[r.itemId], canEdit, busy, today),
+          if (canEdit) ...[
+            const SizedBox(height: 14),
+            const Text(
+              'RESERVE STOCK',
+              style: TextStyle(
+                fontSize: 10.5,
+                letterSpacing: 0.8,
+                color: AppTheme.textMuted,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 5,
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('item-$_itemId'),
+                    initialValue: _itemId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Stock item'),
+                    items: [
+                      for (final i in [...items]..sort((a, b) => a.itemCode.compareTo(b.itemCode)))
+                        DropdownMenuItem(
+                          value: i.id,
+                          child: Text(
+                            '${i.itemCode} · ${i.description} (${_qty(i.available)} ${i.unit} free)',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: busy ? null : (v) => setState(() => _itemId = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 110,
+                  child: TextField(
+                    controller: _quantity,
+                    enabled: !busy,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(labelText: 'Quantity', suffixText: selected?.unit),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 150,
+                  child: DateField(
+                    label: 'Needed by',
+                    value: _neededByTouched ? _neededBy : defaultNeededBy,
+                    initial: (_neededByTouched ? _neededBy : defaultNeededBy) ?? today,
+                    enabled: !busy,
+                    onChanged: (v) => setState(() {
+                      _neededBy = v;
+                      _neededByTouched = true;
+                    }),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: FilledButton.tonal(
+                    onPressed: busy ? null : () => _add(mine, defaultNeededBy),
+                    child: _adding
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Reserve'),
+                  ),
+                ),
+              ],
+            ),
+            if (selected != null && (_parse(_quantity.text) ?? 0) > selected.available)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'More than the free stock (${_qty(selected.available)} ${selected.unit}): '
+                  'the item becomes a shortage to order.',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFFF59E0B)),
+                ),
+              ),
+          ],
+          if (_errors.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: const Color(0xFF450A0A), borderRadius: BorderRadius.circular(8)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final l in _errors)
+                    Text('• $l', style: const TextStyle(color: Color(0xFFFCA5A5), fontSize: 12.5)),
+                ],
+              ),
+            ),
+        ],
       ),
-      actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
     );
   }
 
