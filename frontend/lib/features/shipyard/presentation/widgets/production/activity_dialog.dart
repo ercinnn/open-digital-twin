@@ -109,6 +109,8 @@ class _ActivityDialogState extends ConsumerState<ActivityDialog> {
     setState(() => _saving = true);
     try {
       await ref.read(shipyardRepositoryProvider).updateActivityProgress(a);
+      // Finishing (or reopening) launching moves the hull in the database (migration 016).
+      if (a.stage == ProductionStage.launching && a.hullId != null) ref.invalidate(hullsProvider(a.projectId));
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;

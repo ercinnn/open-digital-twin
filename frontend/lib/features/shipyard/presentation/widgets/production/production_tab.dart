@@ -7,6 +7,7 @@ import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../digital_twin/domain/entities/twin_entities.dart';
 import '../../../../digital_twin/presentation/providers/twin_providers.dart';
 import '../../../domain/entities/production_entities.dart';
+import '../../../domain/services/hull_position.dart';
 import '../../../domain/services/production_schedule.dart';
 import '../../providers/shipyard_providers.dart';
 import '../scene_actions.dart';
@@ -41,6 +42,7 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     Map<String, TwinComponent> byNode,
     DateTime today,
     DateTime sceneDate,
+    HullPositionMap positions,
   ) {
     final rows = <GanttRow>[];
     for (final hull in hulls) {
@@ -79,13 +81,21 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
         rows.add(
           GanttRow(
             label: hull.isRepair ? 'Docking & repair' : 'Hull milestones',
-            sublabel: componentIds.isEmpty ? (hull.shipType ?? '') : 'Launching, outfitting, trials',
+            sublabel: _hullPositionText(positions[hull.id], byNode) ??
+                (componentIds.isEmpty ? (hull.shipType ?? '') : 'Launching, outfitting, trials'),
             activities: hullLevel,
           ),
         );
       }
     }
     return rows;
+  }
+
+  /// Where the hull lies at the scene date, e.g. "Afloat · Outfitting Quay".
+  String? _hullPositionText(HullPosition? p, Map<String, TwinComponent> byNode) {
+    if (p == null) return null;
+    final area = p.areaNodeId;
+    return area == null ? p.kind.label : '${p.kind.label} · ${shortComponentName(byNode[area], fallback: area)}';
   }
 
   String _placementText(BlockPlacement p, Map<String, TwinComponent> byNode) => switch (p.kind) {
@@ -293,7 +303,7 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     final byId = componentsById(components);
     final byNode = componentsByNode(components);
     final hullList = hulls.value!;
-    final rows = _rows(hullList, schedule, byId, byNode, today, sceneDate);
+    final rows = _rows(hullList, schedule, byId, byNode, today, sceneDate, ref.watch(hullPositionsProvider(widget.projectId)));
     final running = schedule.runningAt(sceneDate, today).length;
 
     return Column(

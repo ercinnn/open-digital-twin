@@ -4,6 +4,7 @@ import 'package:open_digital_twin/features/digital_twin/domain/entities/twin_ent
 import 'package:open_digital_twin/features/shipyard/domain/entities/block_entities.dart';
 import 'package:open_digital_twin/features/shipyard/domain/entities/production_entities.dart';
 import 'package:open_digital_twin/features/shipyard/domain/services/hull_block_geometry.dart';
+import 'package:open_digital_twin/features/shipyard/domain/services/hull_position.dart';
 
 Hull hull(String no, {double? length = 99, double? beam = 13, String? location}) => Hull(
   id: no,
@@ -136,6 +137,42 @@ void main() {
     // NB-1002 behind NB-1001 (99 m + bulb + 12 m gap).
     expect(origins['NB1002']!.$3, lessThan(-36 - 99 - 12 + 1e-9));
     expect(origins['NB1004'], (dryDock.x, dryDock.keelY, dryDock.firstSternZ));
+  });
+
+  test('a launched hull floats alongside the quay and frees the berth for the next hull', () {
+    final h1 = hull('NB-1001');
+    final nodes = HullBlockGeometry.build(
+      [h1, hull('NB-1002', length: 80)],
+      [...comps, block('NB-1002', 'DB-101', 'DB')],
+      positions: {
+        'NB-1001': const HullPosition(HullPositionKind.afloat, areaNodeId: 'NODE_A19_OUTFITTING_QUAY'),
+        'NB-1002': const HullPosition(HullPositionKind.building, areaNodeId: 'NODE_A16_BUILDING_BERTH'),
+      },
+    );
+    final origins = {for (final n in nodes) n.meshNodeId.split('_')[1]: n.origin};
+    final shape = HullShape.of(h1, {for (final c in comps) c.metadata['block_type'] as String});
+    final draft = HullBlockGeometry.outfittingDraft(h1, shape);
+    expect(draft, greaterThan(0.5));
+    expect(draft, lessThan(shape.depth * 0.45));
+    // Port side against the fenders, keel below the sea surface, stern at the south end of the quay.
+    expect(origins['NB1001'], (outfittingQuay.x + HullSite.fenderGap + 6.5, seaLevelY - draft, outfittingQuay.firstSternZ));
+    // NB-1002 takes the first berth position.
+    expect(origins['NB1002'], (70.0, 2.0, -36.0));
+    final db = bounds(node(nodes, 'NODE_NB1001_BLOCK_DB_101'));
+    expect(db.minX, closeTo(outfittingQuay.x + HullSite.fenderGap, 1e-6));
+    expect(db.minY, lessThan(seaLevelY));
+  });
+
+  test('hulls out of the yard are left out; locations without a position', () {
+    final nodes = HullBlockGeometry.build(
+      [hull('NB-1001'), hull('NB-1002', location: floatingDock.areaNodeId)],
+      [...comps, block('NB-1002', 'DB-101', 'DB')],
+      positions: {'NB-1001': const HullPosition(HullPositionKind.atSea)},
+    );
+    expect(nodes.any((n) => n.meshNodeId.contains('NB1001')), isFalse);
+    expect(nodes.first.origin, (floatingDock.x, floatingDock.keelY, floatingDock.firstSternZ));
+    expect(hullSiteOf('NODE_A05_CNC_CUTTING_SHOP'), buildingBerth);
+    expect(hullSiteOf('NODE_A05_CNC_CUTTING_SHOP', afloat: true), outfittingQuay);
   });
 
   test('missing dimensions use defaults; plan clipping keeps the cut inside the range', () {

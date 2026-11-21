@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import '../../../digital_twin/domain/entities/twin_entities.dart';
 import '../entities/block_entities.dart';
 import '../entities/production_entities.dart';
+import 'block_weights.dart';
+import 'hull_position.dart';
 
 /// A 2D point: (v, h) of a cross-section or (u, v) of a plan outline.
 typedef P2 = (double, double);
@@ -136,9 +138,13 @@ class ProceduralNode {
   };
 }
 
-/// Where hulls are erected in the demo yard GLB (`generate_sample_models.py`):
-/// world x of the centreline, keel height (top of the keel / docking blocks),
-/// world z of the first stern position and the landward limit (bow toward -Z).
+/// Where hulls lie in the demo yard GLB (`generate_sample_models.py`): world x
+/// of the centreline, keel height (top of the keel / docking blocks), world z of
+/// the first stern position and the landward limit (bow toward -Z).
+///
+/// At a quay ([alongside]) `x` is the fender line: the hull lies with its port
+/// side against it, so its centreline is half a beam further out. Afloat the hull
+/// floats on [waterlineY] at its outfitting draft instead of standing on [keelY].
 class HullSite {
   const HullSite(
     this.areaNodeId, {
@@ -146,6 +152,8 @@ class HullSite {
     required this.keelY,
     required this.firstSternZ,
     required this.endZ,
+    this.alongside = false,
+    this.waterlineY,
   });
 
   final String areaNodeId;
@@ -153,13 +161,50 @@ class HullSite {
   final double keelY;
   final double firstSternZ;
   final double endZ;
+  final bool alongside;
+  final double? waterlineY;
+
+  bool get afloat => waterlineY != null;
+
+  /// Hull origin (stern, centreline, keel) of a hull of [shape] with its stern at [sternZ].
+  (double, double, double) originFor(HullShape shape, double sternZ, {required double afloatDraft}) => (
+    alongside ? x + fenderGap + shape.half : x,
+    afloat ? waterlineY! - afloatDraft : keelY,
+    sternZ,
+  );
+
+  /// Clearance between the fender line and the hull side.
+  static const fenderGap = 0.8;
 }
+
+/// Sea level of the yard model (`SEA_Z`).
+const seaLevelY = -3.0;
 
 /// Building berth: slab x 50..90, Blender y -40..410 (z = -y), keel blocks from y 42.
 const buildingBerth = HullSite('NODE_A16_BUILDING_BERTH', x: 70, keelY: 2.0, firstSternZ: -36, endZ: -400);
 
 /// Dry dock: floor x 143..193, Blender y 4..362, docking blocks (top -10.6) from y 40.
 const dryDock = HullSite('NODE_A17_DRY_DOCK', x: 168, keelY: -10.6, firstSternZ: -34, endZ: -360);
+
+/// Floating dock: pontoon x 840..872 (deck -2), Blender y 480..630, docking blocks 1.4 m.
+const floatingDock = HullSite('NODE_A18_FLOATING_DOCK', x: 856, keelY: -0.6, firstSternZ: -484, endZ: -626);
+
+/// Outfitting quay: deck x 760..800 with fenders to x 801.2, Blender y 40..440.
+const outfittingQuay = HullSite(
+  'NODE_A19_OUTFITTING_QUAY',
+  x: 801.2,
+  keelY: seaLevelY,
+  firstSternZ: -44,
+  endZ: -436,
+  alongside: true,
+  waterlineY: seaLevelY,
+);
+
+const hullSites = [buildingBerth, dryDock, floatingDock, outfittingQuay];
+
+/// Site of a yard area; unknown areas: the quay for afloat hulls, else the berth.
+HullSite hullSiteOf(String? areaNodeId, {bool afloat = false}) =>
+    hullSites.where((s) => s.areaNodeId == areaNodeId).firstOrNull ?? (afloat ? outfittingQuay : buildingBerth);
 
 const _primer = '#9a4a32';
 const _superstructure = '#dfe4ea';
@@ -282,23 +327,36 @@ class HullBlockGeometry {
   static const seam = 0.06;
 
   /// Blocks of every hull (with at least one block) at its site, in tandem when a
-  /// site hosts several hulls. Hulls whose location is the dry dock go there, all
-  /// others on the building berth. Mesh ids already in the GLB are skipped by the viewer.
-  static List<ProceduralNode> build(List<Hull> hulls, List<TwinComponent> components) {
+  /// site hosts several hulls. The site comes from [positions] (`HullPositions`,
+  /// the hull's place at the scene date: berth, dock, quay); hulls that are not in
+  /// the yard there (sea trials, delivered) are left out. Without a position the
+  /// hull lies at its location: dry dock, floating dock or quay, else the berth.
+  /// Mesh ids already in the GLB are skipped by the viewer.
+  static List<ProceduralNode> build(
+    List<Hull> hulls,
+    List<TwinComponent> components, {
+    Map<String, HullPosition> positions = const {},
+  }) {
     final nodes = <ProceduralNode>[];
     final nextStern = <HullSite, double>{};
     final sorted = [...hulls]..sort((a, b) => a.hullNo.compareTo(b.hullNo));
     for (final hull in sorted) {
       final blocks = blocksOfHull(components, hull.hullNo);
       if (blocks.isEmpty) continue;
-      final site = hull.locationNodeId == dryDock.areaNodeId ? dryDock : buildingBerth;
+      final position = positions[hull.id] ?? HullPositions.fromLocation(hull);
+      if (!position.inYard) continue;
+      final site = hullSiteOf(position.areaNodeId, afloat: position.kind == HullPositionKind.afloat);
       final shape = HullShape.of(hull, {for (final b in blocks) b.type?.code ?? 'BLK'});
       final sternZ = nextStern[site] ?? site.firstSternZ;
       nextStern[site] = sternZ - shape.length - shape.bulbOverhang - 12;
-      nodes.addAll(hullNodes(hull.hullNo, blocks, shape, (site.x, site.keelY, sternZ)));
+      final origin = site.originFor(shape, sternZ, afloatDraft: outfittingDraft(hull, shape));
+      nodes.addAll(hullNodes(hull.hullNo, blocks, shape, origin));
     }
     return nodes;
   }
+
+  /// Draft afloat after launching (light ship + ballast): 45 % of the design draft.
+  static double outfittingDraft(Hull hull, HullShape shape) => BlockWeights.designDraft(hull, shape) * 0.45;
 
   /// Envelope (context) and block nodes of one hull with the origin [origin].
   static List<ProceduralNode> hullNodes(

@@ -114,6 +114,16 @@ class BlockWeights {
   /// Seawater density used for the displacement.
   static const seawater = 1.025;
 
+  /// Design draft T: from the deadweight (displacement = DWT / ratio), else 70 %
+  /// of the depth; kept within 45-85 % of the depth.
+  static double designDraft(Hull hull, HullShape shape) {
+    final f = ShipTypeFactors.of(hull.shipType);
+    final d = shape.depth;
+    final dwt = hull.deadweightT ?? 0;
+    final t = dwt > 0 ? dwt / f.deadweightRatio / (seawater * f.blockCoefficient * shape.length * shape.beam) : d * 0.7;
+    return t.clamp(d * 0.45, d * 0.85).toDouble();
+  }
+
   /// Estimates for [blocks] (key, type, side) of [hull]; `null` without length or beam.
   static HullSteelEstimate? estimate(Hull hull, List<(String, BlockType?, BlockSide)> blocks) {
     final l = hull.lengthM ?? 0, b = hull.beamM ?? 0;
@@ -124,13 +134,8 @@ class BlockWeights {
     final depthValue = hull.metadata['depth_m'];
     final depthEstimated = !(depthValue is num && depthValue > 1);
     final f = ShipTypeFactors.of(hull.shipType);
-
-    // Draft from the deadweight (displacement = DWT / ratio), else 70 % of the depth.
-    final dwt = hull.deadweightT ?? 0;
-    final fromDwt = dwt > 0;
-    final draft = (fromDwt ? dwt / f.deadweightRatio / (seawater * f.blockCoefficient * l * b) : d * 0.7)
-        .clamp(d * 0.45, d * 0.85)
-        .toDouble();
+    final fromDwt = (hull.deadweightT ?? 0) > 0;
+    final draft = designDraft(hull, shape);
 
     // Lloyd's equipment numeral: hull + forecastle / poop + deckhouses.
     final count = <String, int>{};

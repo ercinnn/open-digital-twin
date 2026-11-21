@@ -243,21 +243,26 @@ final sceneLabelsProvider = Provider.autoDispose.family<Map<String, String>, Str
 
 /// App-built 3D geometry of the hull blocks entered in Production "Blocks"
 /// (viewer command `set_procedural`); blocks with a GLB mesh keep the GLB mesh.
+/// Each hull lies where it is at the scene date (berth -> quay after launching).
 final hullBlockGeometryProvider = Provider.autoDispose.family<List<Map<String, dynamic>>, String>((ref, projectId) {
   final hulls = ref.watch(hullsProvider(projectId)).value ?? const [];
   if (hulls.isEmpty) return const [];
   final components = ref.watch(componentsProvider(projectId)).value ?? const [];
-  return [for (final n in HullBlockGeometry.build(hulls, components)) n.toJson()];
+  final positions = ref.watch(hullPositionsProvider(projectId));
+  return [for (final n in HullBlockGeometry.build(hulls, components, positions: positions.byHullId)) n.toJson()];
 });
 
-/// Camera views of the hulls that have blocks: (label, block mesh ids).
+/// Camera views of the hulls that have blocks and are in the yard at the scene
+/// date: (label, block mesh ids).
 final hullCameraViewsProvider = Provider.autoDispose.family<List<(String, List<String>)>, String>((ref, projectId) {
   final hulls = [...ref.watch(hullsProvider(projectId)).value ?? const []]..sort((a, b) => a.hullNo.compareTo(b.hullNo));
   final components = ref.watch(componentsProvider(projectId)).value ?? const [];
+  final positions = ref.watch(hullPositionsProvider(projectId));
   return [
     for (final h in hulls)
-      if (blocksOfHull(components, h.hullNo) case final blocks when blocks.isNotEmpty)
-        (h.displayName, [for (final b in blocks) b.meshNodeId]),
+      if (positions[h.id]?.inYard ?? true)
+        if (blocksOfHull(components, h.hullNo) case final blocks when blocks.isNotEmpty)
+          (h.displayName, [for (final b in blocks) b.meshNodeId]),
   ];
 });
 

@@ -11,6 +11,7 @@ import '../../domain/entities/production_entities.dart';
 import '../../domain/entities/quality_entities.dart';
 import '../../domain/entities/resource_entities.dart';
 import '../../domain/repositories/shipyard_repository.dart';
+import '../../domain/services/hull_position.dart';
 import '../../domain/services/production_schedule.dart';
 import '../../domain/services/yard_kpis.dart';
 import 'scene_view_providers.dart' show organizationProvider;
@@ -130,7 +131,15 @@ final blockPlacementsProvider = Provider.autoDispose.family<Map<String, BlockPla
   };
 });
 
-final bookingsProvider = StreamProvider.autoDispose.family<List<ResourceBooking>, String>((ref, projectId) {
+/// Where every hull lies at the scene date (berth, dock, quay, at sea, delivered).
+/// Value-equal between timeline ticks unless a hull moves.
+final hullPositionsProvider = Provider.autoDispose.family<HullPositionMap, String>((ref, projectId) {
+  final hulls = ref.watch(hullsProvider(projectId)).value ?? const <Hull>[];
+  final activities = ref.watch(activitiesProvider(projectId)).value ?? const <ProductionActivity>[];
+  return HullPositions.all(hulls, activities, ref.watch(sceneDateProvider(projectId)), ref.watch(todayProvider));
+});
+
+final bookingsProvider =StreamProvider.autoDispose.family<List<ResourceBooking>, String>((ref, projectId) {
   return ref.watch(shipyardRepositoryProvider).watchBookings(projectId);
 });
 
