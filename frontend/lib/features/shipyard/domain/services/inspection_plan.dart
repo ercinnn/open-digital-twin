@@ -3,15 +3,18 @@ import '../entities/quality_entities.dart';
 
 /// One inspection the template plans for a schedule stage.
 class _Step {
-  const _Step(this.type, this.description, {this.witness, this.hold = false, this.package});
+  const _Step(this.type, this.description, {this.witness, this.hold = false, this.package, this.generic = false});
 
   final InspectionType type;
   final String description;
   final String? witness;
 
-  /// Only for this afloat outfitting work package (and the generic outfitting
-  /// row without a package).
+  /// Only for this afloat outfitting work package.
   final WorkPackage? package;
+
+  /// Also for the generic outfitting row without a package (the row the
+  /// package split turns into [package]).
+  final bool generic;
 
   /// Hold point (H): the stage cannot be reported finished before it passes
   /// (database trigger, migration 013). Otherwise a witness / review point.
@@ -52,6 +55,42 @@ const _template = <ProductionStage, List<_Step>>{
       witness: 'Class surveyor',
       hold: true,
       package: WorkPackage.piping,
+      generic: true,
+    ),
+    _Step(InspectionType.visualWeld, 'Outfitting steel welds, seats & fittings, visual', package: WorkPackage.outfittingSteel),
+    _Step(
+      InspectionType.classSurvey,
+      'Hatch covers & deck machinery, hose test and function test',
+      witness: 'Class surveyor',
+      hold: true,
+      package: WorkPackage.deckMachinery,
+    ),
+    _Step(
+      InspectionType.dimensional,
+      'Shaft alignment & main engine chocking',
+      witness: 'Class surveyor',
+      hold: true,
+      package: WorkPackage.machinery,
+    ),
+    _Step(
+      InspectionType.classSurvey,
+      'Cabling & switchboard, insulation resistance test',
+      witness: 'Class surveyor',
+      package: WorkPackage.electrical,
+    ),
+    _Step(
+      InspectionType.classSurvey,
+      'Structural fire protection (A-60 insulation) & accommodation',
+      witness: 'Class surveyor',
+      hold: true,
+      package: WorkPackage.accommodation,
+    ),
+    _Step(
+      InspectionType.coatingDft,
+      'Final coat DFT, topsides & deck',
+      witness: 'Owner representative',
+      hold: true,
+      package: WorkPackage.painting,
     ),
   ],
   ProductionStage.commissioning: [
@@ -88,13 +127,21 @@ class InspectionPlan {
     Iterable<String> existingReferences = const [],
     List<QualityInspection> existing = const [],
     String? componentId,
+    String? activityId,
   }) {
     final planned = {
       for (final q in existing)
         if (q.activityId != null) (q.activityId!, q.type),
     };
     final rows =
-        activities.where((a) => a.hullId == hull.id && (componentId == null || a.componentId == componentId)).toList()
+        activities
+            .where(
+              (a) =>
+                  a.hullId == hull.id &&
+                  (componentId == null || a.componentId == componentId) &&
+                  (activityId == null || a.id == activityId),
+            )
+            .toList()
           ..sort((a, b) {
             final c = a.plannedEnd.compareTo(b.plannedEnd);
             return c != 0 ? c : a.sortOrder.compareTo(b.sortOrder);
@@ -108,7 +155,7 @@ class InspectionPlan {
       if (component == null) continue;
       for (final step in _template[a.stage] ?? const <_Step>[]) {
         if (planned.contains((a.id, step.type))) continue;
-        if (step.package != null && a.workPackage != null && a.workPackage != step.package) continue;
+        if (step.package != null && (a.workPackage == null ? !step.generic : a.workPackage != step.package)) continue;
         final preset = inspectionPresets[step.type]!;
         drafts.add(
           InspectionDraft(

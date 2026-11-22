@@ -273,11 +273,12 @@ def operations_sql(cur, day0: dt.date) -> tuple[str, dict[str, int]]:
     ).fetchall()
     reservations = cur.execute(
         """select i.item_code, c.category, c.metadata->>'hull_no', c.metadata->>'block_no', c.mesh_node_id,
-                  h.hull_no, r.quantity, r.needed_by, r.status, r.issued_at, r.notes
+                  h.hull_no, r.quantity, r.needed_by, r.status, r.issued_at, r.notes, a.activity_code
              from public.material_reservations r
              join public.material_items i on i.id = r.item_id
              join public.components c on c.id = r.component_id
              left join public.hulls h on h.id = r.hull_id
+             left join public.production_activities a on a.id = r.activity_id
             where r.project_id = %s
             order by c.metadata->>'hull_no', (c.metadata->>'erection_sequence')::int nulls last, c.mesh_node_id,
                      i.item_code, r.created_at""",
@@ -353,7 +354,7 @@ join public.production_activities a on a.project_id = """
         )
     if reservations:
         rows = []
-        for code, category, b_hull, b_no, node, hull_no, qty, needed, status, issued, notes in reservations:
+        for code, category, b_hull, b_no, node, hull_no, qty, needed, status, issued, notes, act in reservations:
             is_block = category == "hull_structure"
             issued_d, issued_m = utc_offset(issued, day0)
             rows.append(
@@ -369,28 +370,30 @@ join public.production_activities a on a.project_id = """
                     issued_d,
                     issued_m,
                     lit(notes),
+                    lit(act),
                 ]
             )
         out.append(
-            """-- Block material reservations (012; Blocks dialog > block, Materials "Reserve steel").
+            """-- Material reservations (012; Blocks dialog > block, Materials "Reserve steel"; work packages:
+-- activity = package row, component = its yard area, 018 / Materials "Reserve outfitting").
 -- The database recalculates material_items.quantity_block_reserved; `issued` rows lower
 -- the stock on hand and write the trace event again.
 insert into public.material_reservations
-    (project_id, item_id, component_id, hull_id, quantity, needed_by, status, issued_at, notes)
+    (project_id, item_id, component_id, hull_id, quantity, needed_by, status, issued_at, notes, activity_id)
 select """
             + P
             + """, i.id, c.id, h.id, x.quantity::numeric, current_date + x.d_needed::int, x.status,
        (current_date + x.d_issued::int)::timestamp at time zone 'UTC' + make_interval(mins => x.m_issued::int),
-       x.notes
+       x.notes, a.id
 from (values
 """
             + values_block(
                 "item, block hull, block, other component node, hull, quantity, needed by (days), status, "
-                "issued (days, minutes UTC), notes",
+                "issued (days, minutes UTC), notes, activity",
                 rows,
             )
             + """
-) as x(item_code, block_hull, block_no, node, hull_no, quantity, d_needed, status, d_issued, m_issued, notes)
+) as x(item_code, block_hull, block_no, node, hull_no, quantity, d_needed, status, d_issued, m_issued, notes, activity)
 join public.material_items i on i.project_id = """
             + P
             + """ and i.item_code = x.item_code
@@ -402,7 +405,10 @@ join public.components c on c.project_id = """
       or (x.block_no is null and c.mesh_node_id = x.node))
 left join public.hulls h on h.project_id = """
             + P
-            + """ and h.hull_no = x.hull_no;
+            + """ and h.hull_no = x.hull_no
+left join public.production_activities a on a.project_id = """
+            + P
+            + """ and a.activity_code = x.activity;
 """
         )
     if inspections:

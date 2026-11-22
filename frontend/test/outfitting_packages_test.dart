@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_digital_twin/features/shipyard/data/models/production_models.dart';
 import 'package:open_digital_twin/features/shipyard/domain/entities/production_entities.dart';
+import 'package:open_digital_twin/features/shipyard/domain/entities/quality_entities.dart';
 import 'package:open_digital_twin/features/shipyard/domain/services/draft_schedule.dart';
 import 'package:open_digital_twin/features/shipyard/domain/services/inspection_plan.dart';
 import 'package:open_digital_twin/features/shipyard/domain/services/outfitting_packages.dart';
@@ -224,7 +225,7 @@ void main() {
     );
   });
 
-  test('the outfitting pressure test goes to the piping package only', () {
+  test('each package gets its own ITP point; the pressure test goes to piping only', () {
     final rows = stored(DraftSchedule.forHull(nb, today: today, outfittingPackages: true).activities);
     final nodes = {for (final n in stageDefaultLocations.values.whereType<String>()) n: 'c-$n'};
     final plan = InspectionPlan.fromSchedule(hull: nb, activities: rows, componentIdByNode: nodes);
@@ -233,8 +234,24 @@ void main() {
         if (a.stage == ProductionStage.outfitting) a.id: a.workPackage,
     };
     final points = plan.where((q) => outfittingIds.containsKey(q.activityId)).toList();
-    expect(points, hasLength(1));
-    expect(outfittingIds[points.single.activityId], WorkPackage.piping);
-    expect(points.single.holdPoint, isTrue);
+    expect(points, hasLength(WorkPackage.values.length));
+    expect({for (final q in points) outfittingIds[q.activityId]}, WorkPackage.values.toSet());
+    final pressure = points.where((q) => q.type == InspectionType.pressureTest).single;
+    expect(outfittingIds[pressure.activityId], WorkPackage.piping);
+    expect(pressure.holdPoint, isTrue);
+    // Witness only: outfitting steel and electrical; the others are hold points.
+    expect(
+      {for (final q in points.where((q) => !q.holdPoint)) outfittingIds[q.activityId]},
+      {WorkPackage.outfittingSteel, WorkPackage.electrical},
+    );
+    // Points of one package only (package dialog).
+    final one = InspectionPlan.fromSchedule(
+      hull: nb,
+      activities: rows,
+      componentIdByNode: nodes,
+      activityId: rows.firstWhere((a) => a.workPackage == WorkPackage.machinery).id,
+    );
+    expect(one.single.description, 'NB-1004 Shaft alignment & main engine chocking');
+    expect(one.single.componentId, 'c-$quay');
   });
 }

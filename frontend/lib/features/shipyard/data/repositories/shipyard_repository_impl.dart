@@ -399,7 +399,7 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
     } on PostgrestException catch (e) {
       if (e.code == '23505') {
         throw const ShipyardException(
-          'A block already has an open reservation of this item - change its quantity instead.',
+          'This block / work package already has an open reservation of this item - change its quantity instead.',
         );
       }
       _rethrow(e);

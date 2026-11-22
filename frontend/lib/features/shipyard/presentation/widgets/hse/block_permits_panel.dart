@@ -5,23 +5,24 @@ import '../../../../../core/theme/app_theme.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../digital_twin/domain/entities/twin_entities.dart';
 import '../../../../digital_twin/presentation/providers/twin_providers.dart';
-import '../../../domain/entities/block_entities.dart';
 import '../../../domain/entities/hse_entities.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/entities/resource_entities.dart';
+import '../../../domain/entities/work_scope.dart';
 import '../../../domain/services/permit_plan.dart';
 import '../../providers/shipyard_providers.dart';
 import 'hse_dialogs.dart';
 import 'new_permit_dialog.dart';
 
-/// Permits-to-work of one hull block (tab of the block dialog): the permits the
-/// block's running / next rows need ([PermitPlan]) with a prefilled request for
-/// each missing one, and all permits of the block (tap: approve, activate, close).
+/// Permits-to-work of one hull block or afloat outfitting work package (tab of
+/// the block / package dialog): the permits its running / next rows need
+/// ([PermitPlan]) with a prefilled request for each missing one, and all its
+/// permits (tap: approve, activate, close).
 class BlockPermitsPanel extends ConsumerStatefulWidget {
-  const BlockPermitsPanel({super.key, required this.projectId, required this.block, required this.hull});
+  const BlockPermitsPanel({super.key, required this.projectId, required this.scope, required this.hull});
 
   final String projectId;
-  final HullBlock block;
+  final WorkScope scope;
   final Hull? hull;
 
   @override
@@ -39,7 +40,8 @@ class _BlockPermitsPanelState extends ConsumerState<BlockPermitsPanel> {
         ? null
         : PermitPlan.suggest(
             need: need,
-            block: widget.block,
+            block: widget.scope.block,
+            title: widget.scope.isPackage ? widget.scope.packageRow!.name : null,
             bookings: ref.read(bookingsProvider(widget.projectId)).value ?? const <ResourceBooking>[],
             now: now,
           );
@@ -51,9 +53,9 @@ class _BlockPermitsPanelState extends ConsumerState<BlockPermitsPanel> {
       components: components,
       zones: ref.read(zonesProvider(widget.projectId)).value ?? const <HseZone>[],
       existing: permits,
-      initialComponentId: widget.block.componentId,
+      initialComponentId: widget.scope.componentIdIn({for (final c in components) c.meshNodeId: c.id}),
       initialHullId: widget.hull?.id,
-      activity: need?.activity,
+      activity: need?.activity ?? widget.scope.packageRow,
       initialType: need?.type,
       initialDescription: suggestion?.description,
       initialFrom: suggestion?.validFrom,
@@ -77,11 +79,12 @@ class _BlockPermitsPanelState extends ConsumerState<BlockPermitsPanel> {
     final canEdit = ref.watch(isEditorProvider);
     final now = DateTime.now();
     final permits = permitsAsync.value ?? const <WorkPermit>[];
-    final block = components.where((c) => c.id == widget.block.componentId).firstOrNull;
+    final scope = widget.scope;
+    final componentId = scope.componentIdIn({for (final c in components) c.meshNodeId: c.id});
+    final block = components.where((c) => c.id == componentId).firstOrNull;
     final rowsById = {for (final a in activities) a.id: a};
-    final mine = permits.where((p) => p.componentId == widget.block.componentId).toList()
-      ..sort((a, b) => b.validFrom.compareTo(a.validFrom));
-    final needs = PermitPlan.forBlock(block: widget.block, activities: activities, permits: permits, now: now);
+    final mine = permits.where(scope.ownsPermit).toList()..sort((a, b) => b.validFrom.compareTo(a.validFrom));
+    final needs = PermitPlan.forScope(scope: scope, activities: activities, permits: permits, now: now);
     final missing = needs.where((n) => !n.covered).length;
 
     if (permitsAsync.isLoading && !permitsAsync.hasValue) {
@@ -95,8 +98,8 @@ class _BlockPermitsPanelState extends ConsumerState<BlockPermitsPanel> {
         children: [
           Text(
             needs.isEmpty
-                ? 'No permit needed now: no permit-bound work of this block runs today or starts within '
-                      '${PermitPlan.lookAheadDays} days (cutting, bending and panel work are workshop jobs).'
+                ? 'No permit needed now: no permit-bound work of this ${scope.noun} runs today or starts within '
+                      '${PermitPlan.lookAheadDays} days${scope.isPackage ? '' : ' (cutting, bending and panel work are workshop jobs)'}.'
                 : 'NEEDED FOR THE WORK NOW AND IN THE NEXT ${PermitPlan.lookAheadDays} DAYS'
                       '${missing == 0 ? ' - all covered' : ' - $missing missing'}',
             style: needs.isEmpty
@@ -115,7 +118,7 @@ class _BlockPermitsPanelState extends ConsumerState<BlockPermitsPanel> {
             children: [
               Expanded(
                 child: Text(
-                  'PERMITS OF THE BLOCK (${mine.length})',
+                  'PERMITS OF THE ${scope.noun.toUpperCase()} (${mine.length})',
                   style: const TextStyle(
                     fontSize: 10.5,
                     letterSpacing: 0.8,
@@ -133,7 +136,10 @@ class _BlockPermitsPanelState extends ConsumerState<BlockPermitsPanel> {
             ],
           ),
           if (mine.isEmpty)
-            const Text('No permits for this block yet.', style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted)),
+            Text(
+              'No permits for this ${scope.noun} yet.',
+              style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+            ),
           for (final p in mine) _permit(p, rowsById[p.activityId], block, now),
         ],
       ),

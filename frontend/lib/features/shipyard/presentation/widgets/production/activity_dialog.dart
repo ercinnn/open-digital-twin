@@ -8,7 +8,13 @@ import '../../../domain/repositories/shipyard_repository.dart';
 import '../../providers/shipyard_providers.dart';
 
 /// What the caller should do after [ActivityDialog] closed.
-enum ActivityDialogResult { editPlan, deleted }
+enum ActivityDialogResult {
+  editPlan,
+  deleted,
+
+  /// Open the materials / inspections / permits of the work package row.
+  packageWork,
+}
 
 /// Details of one schedule row; editors can report progress and actual dates,
 /// open the plan editor or delete the row.
@@ -226,6 +232,12 @@ class _ActivityDialogState extends ConsumerState<ActivityDialog> {
         ),
       ),
       actions: [
+        if (widget.activity.workPackage != null)
+          TextButton.icon(
+            onPressed: _saving ? null : () => Navigator.of(context).pop(ActivityDialogResult.packageWork),
+            icon: const Icon(Icons.handyman_outlined, size: 18),
+            label: const Text('Materials, ITP & permits'),
+          ),
         if (canEdit) ...[
           TextButton(
             onPressed: _saving ? null : _delete,

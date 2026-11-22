@@ -5,24 +5,24 @@ import '../../../../../core/theme/app_theme.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../digital_twin/domain/entities/twin_entities.dart';
 import '../../../../digital_twin/presentation/providers/twin_providers.dart';
-import '../../../domain/entities/block_entities.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/entities/quality_entities.dart';
+import '../../../domain/entities/work_scope.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
 import '../../../domain/services/inspection_plan.dart';
 import '../../providers/shipyard_providers.dart';
 import 'inspection_plan_dialogs.dart';
 import 'quality_dialogs.dart';
 
-/// ITP inspections of one hull block (tab of the block dialog): the block's
-/// inspection points with their schedule row and result, the ITP draft for the
-/// block's schedule rows that have no points yet, single inspections, and
-/// recording results (tap a row).
+/// ITP inspections of one hull block or afloat outfitting work package (tab of
+/// the block / package dialog): its inspection points with their schedule row
+/// and result, the ITP draft for its schedule rows that have no points yet,
+/// single inspections, and recording results (tap a row).
 class BlockInspectionsPanel extends ConsumerStatefulWidget {
-  const BlockInspectionsPanel({super.key, required this.projectId, required this.block, required this.hull});
+  const BlockInspectionsPanel({super.key, required this.projectId, required this.scope, required this.hull});
 
   final String projectId;
-  final HullBlock block;
+  final WorkScope scope;
   final Hull? hull;
 
   @override
@@ -50,7 +50,7 @@ class _BlockInspectionsPanelState extends ConsumerState<BlockInspectionsPanel> {
     }
   }
 
-  Future<void> _planOne(List<TwinComponent> components, List<QualityInspection> all) async {
+  Future<void> _planOne(List<TwinComponent> components, List<QualityInspection> all, String? componentId) async {
     final saved = await NewInspectionDialog.show(
       context,
       projectId: widget.projectId,
@@ -58,7 +58,7 @@ class _BlockInspectionsPanelState extends ConsumerState<BlockInspectionsPanel> {
       components: components,
       existing: all,
       initialHullId: widget.hull?.id,
-      initialComponentId: widget.block.componentId,
+      initialComponentId: componentId,
     );
     if (saved == true && mounted) _refresh();
   }
@@ -79,10 +79,13 @@ class _BlockInspectionsPanelState extends ConsumerState<BlockInspectionsPanel> {
     final components = ref.watch(componentsProvider(projectId)).value ?? const <TwinComponent>[];
     final canEdit = ref.watch(isEditorProvider);
     final all = inspections.value ?? const <QualityInspection>[];
-    final block = components.where((c) => c.id == widget.block.componentId).firstOrNull;
+    final scope = widget.scope;
+    final componentIdByNode = {for (final c in components) c.meshNodeId: c.id};
+    final componentId = scope.componentIdIn(componentIdByNode);
+    final block = components.where((c) => c.id == componentId).firstOrNull;
     final rowsById = {for (final a in activities) a.id: a};
-    final blockRows = activities.where((a) => a.componentId == widget.block.componentId).toList();
-    final mine = all.where((q) => q.componentId == widget.block.componentId).toList()
+    final blockRows = activities.where(scope.ownsRow).toList();
+    final mine = all.where(scope.ownsInspection).toList()
       ..sort((a, b) => a.inspectedAt.compareTo(b.inspectedAt));
     final hull = widget.hull;
     final drafts = hull == null || !inspections.hasValue
@@ -90,10 +93,11 @@ class _BlockInspectionsPanelState extends ConsumerState<BlockInspectionsPanel> {
         : InspectionPlan.fromSchedule(
             hull: hull,
             activities: activities,
-            componentIdByNode: {for (final c in components) c.meshNodeId: c.id},
+            componentIdByNode: componentIdByNode,
             existingReferences: all.map((q) => q.referenceNo),
             existing: all,
-            componentId: widget.block.componentId,
+            componentId: scope.block?.componentId,
+            activityId: scope.activityId,
           );
     int count(InspectionResult r) => mine.where((q) => q.result == r).length;
     final openHolds = mine.where((q) => q.isOpenHold).length;
@@ -114,7 +118,7 @@ class _BlockInspectionsPanelState extends ConsumerState<BlockInspectionsPanel> {
           else ...[
             Text(
               mine.isEmpty
-                  ? 'No inspections for this block yet.'
+                  ? 'No inspections for this ${scope.noun} yet.'
                   : '${mine.length} inspection${mine.length == 1 ? '' : 's'} · ${count(InspectionResult.pass)} pass · '
                         '${count(InspectionResult.pending)} pending · ${count(InspectionResult.fail)} fail'
                         '${count(InspectionResult.conditional) == 0 ? '' : ' · ${count(InspectionResult.conditional)} conditional'}'
@@ -151,7 +155,7 @@ class _BlockInspectionsPanelState extends ConsumerState<BlockInspectionsPanel> {
                     ),
                   ),
                   OutlinedButton.icon(
-                    onPressed: _saving ? null : () => _planOne(components, all),
+                    onPressed: _saving ? null : () => _planOne(components, all, componentId),
                     icon: const Icon(Icons.playlist_add_check, size: 18),
                     label: const Text('Plan inspection…'),
                   ),
@@ -162,9 +166,10 @@ class _BlockInspectionsPanelState extends ConsumerState<BlockInspectionsPanel> {
                 blockRows.isEmpty
                     ? 'The block has no schedule rows: draft its schedule first (Production → Plan).'
                     : drafts.isEmpty
-                    ? 'Every inspection point of the block\'s ${blockRows.length} schedule rows is planned.'
-                    : 'The ITP draft adds the hold / witness points of the block\'s schedule rows that have none yet '
-                          '(planned on the last day of each row, 10:00).',
+                    ? 'Every inspection point of the ${scope.noun}\'s ${blockRows.length} schedule '
+                          'row${blockRows.length == 1 ? '' : 's'} is planned.'
+                    : 'The ITP draft adds the hold / witness points of the ${scope.noun}\'s schedule rows that have '
+                          'none yet (planned on the last day of each row, 10:00).',
                 style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
               ),
             ],

@@ -3,9 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/theme/app_theme.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
-import '../../../domain/entities/block_entities.dart';
+import '../../../../digital_twin/domain/entities/twin_entities.dart';
+import '../../../../digital_twin/presentation/providers/twin_providers.dart';
 import '../../../domain/entities/material_entities.dart';
 import '../../../domain/entities/production_entities.dart';
+import '../../../domain/entities/work_scope.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
 import '../../providers/shipyard_providers.dart';
 import '../date_field.dart';
@@ -14,14 +16,14 @@ String _qty(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStr
 
 double? _parse(String text) => double.tryParse(text.trim().replaceAll(',', '.'));
 
-/// Material reserved for one hull block (tab of the block dialog): reserve stock
-/// items, change the quantity / needed-by date, issue to the shop (stock goes
-/// down) or delete.
+/// Material reserved for one hull block or afloat outfitting work package (tab
+/// of the block / package dialog): reserve stock items, change the quantity /
+/// needed-by date, issue to the shop or on board (stock goes down) or delete.
 class BlockMaterialsPanel extends ConsumerStatefulWidget {
-  const BlockMaterialsPanel({super.key, required this.projectId, required this.block, this.hullId});
+  const BlockMaterialsPanel({super.key, required this.projectId, required this.scope, this.hullId});
 
   final String projectId;
-  final HullBlock block;
+  final WorkScope scope;
   final String? hullId;
 
   @override
@@ -48,10 +50,10 @@ class _BlockMaterialsPanelState extends ConsumerState<BlockMaterialsPanel> {
     ref.invalidate(materialsProvider(widget.projectId));
   }
 
-  /// Start of the block's first schedule row.
+  /// Start of the first schedule row of the block / package.
   DateTime? _firstStart(List<ProductionActivity> activities) {
     DateTime? first;
-    for (final a in activities.where((a) => a.componentId == widget.block.componentId)) {
+    for (final a in activities.where(widget.scope.ownsRow)) {
       if (first == null || a.plannedStart.isBefore(first)) first = dateOnly(a.plannedStart);
     }
     return first;
@@ -72,12 +74,13 @@ class _BlockMaterialsPanelState extends ConsumerState<BlockMaterialsPanel> {
     }
   }
 
-  Future<void> _add(List<MaterialReservation> mine, DateTime? defaultNeededBy) async {
+  Future<void> _add(List<MaterialReservation> mine, DateTime? defaultNeededBy, String? componentId) async {
     final draft = ReservationDraft(
       projectId: widget.projectId,
       itemId: _itemId,
-      componentId: widget.block.componentId,
+      componentId: componentId,
       hullId: widget.hullId,
+      activityId: widget.scope.activityId,
       quantity: _parse(_quantity.text) ?? 0,
       neededBy: _neededByTouched ? _neededBy : defaultNeededBy,
     );
@@ -114,7 +117,7 @@ class _BlockMaterialsPanelState extends ConsumerState<BlockMaterialsPanel> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setLocal) => AlertDialog(
-          title: Text('${item?.itemCode ?? 'Item'} for ${widget.block.blockNo}'),
+          title: Text('${item?.itemCode ?? 'Item'} for ${widget.scope.code}'),
           content: SizedBox(
             width: 340,
             child: Column(
@@ -171,7 +174,7 @@ class _BlockMaterialsPanelState extends ConsumerState<BlockMaterialsPanel> {
       builder: (context) => AlertDialog(
         title: Text('Issue ${_qty(r.quantity)} $unit ${item?.itemCode ?? ''}?'),
         content: Text(
-          'Hands the material out for ${widget.block.blockNo}: stock on hand goes down by ${_qty(r.quantity)} $unit '
+          'Hands the material out for ${widget.scope.code}: stock on hand goes down by ${_qty(r.quantity)} $unit '
           'and the trace history records "issued". An issued reservation cannot be changed.',
         ),
         actions: [
@@ -193,9 +196,11 @@ class _BlockMaterialsPanelState extends ConsumerState<BlockMaterialsPanel> {
     final canEdit = ref.watch(isEditorProvider);
     final today = ref.watch(todayProvider);
     final itemsById = {for (final i in items) i.id: i};
+    final components = ref.watch(componentsProvider(projectId)).value ?? const <TwinComponent>[];
+    final componentId = widget.scope.componentIdIn({for (final c in components) c.meshNodeId: c.id});
     final mine =
         (reservations.value ?? const <MaterialReservation>[])
-            .where((r) => r.componentId == widget.block.componentId)
+            .where(widget.scope.ownsReservation)
             .toList()
           ..sort((a, b) {
             if (a.isOpen != b.isOpen) return a.isOpen ? -1 : 1;
@@ -204,7 +209,9 @@ class _BlockMaterialsPanelState extends ConsumerState<BlockMaterialsPanel> {
     final defaultNeededBy = _firstStart(activities);
     final selected = itemsById[_itemId];
     final busy = _busyId != null || _adding;
-    final weight = widget.block.weightKg;
+    final block = widget.scope.block;
+    final weight = block?.weightKg;
+    final package = widget.scope.package;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.only(top: 12),
@@ -214,9 +221,10 @@ class _BlockMaterialsPanelState extends ConsumerState<BlockMaterialsPanel> {
         children: [
           Text(
             [
-              widget.block.name,
+              block?.name ?? package?.scope ?? widget.scope.code,
               if (weight != null && weight > 0) '${(weight / 1000).toStringAsFixed(1)} t steel',
-              if (defaultNeededBy != null) 'first shop stage ${formatDate(defaultNeededBy)}',
+              if (defaultNeededBy != null)
+                '${block != null ? 'first shop stage' : 'package starts'} ${formatDate(defaultNeededBy)}',
             ].join(' · '),
             style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
           ),
@@ -229,10 +237,14 @@ class _BlockMaterialsPanelState extends ConsumerState<BlockMaterialsPanel> {
           else if (reservations.hasError)
             Text('Could not load reservations: ${reservations.error}', style: const TextStyle(color: Color(0xFFFCA5A5)))
           else if (mine.isEmpty)
-            const Text(
-              'Nothing reserved for this block yet. Materials → "Reserve steel for blocks" drafts plates and '
-              'profiles from the block weights; other items can be added below.',
-              style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+            Text(
+              block != null
+                  ? 'Nothing reserved for this block yet. Materials → "Reserve steel" drafts plates and '
+                        'profiles from the block weights; other items can be added below.'
+                  : 'Nothing reserved for this work package yet. Materials → "Reserve outfitting" drafts the '
+                        'typical warehouse items of the packages; other items can be added below. The package '
+                        'cannot be reported finished while a reservation is not issued.',
+              style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
             )
           else
             for (final r in mine) _row(r, itemsById[r.itemId], canEdit, busy, today),
@@ -300,7 +312,7 @@ class _BlockMaterialsPanelState extends ConsumerState<BlockMaterialsPanel> {
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: FilledButton.tonal(
-                    onPressed: busy ? null : () => _add(mine, defaultNeededBy),
+                    onPressed: busy ? null : () => _add(mine, defaultNeededBy, componentId),
                     child: _adding
                         ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Text('Reserve'),

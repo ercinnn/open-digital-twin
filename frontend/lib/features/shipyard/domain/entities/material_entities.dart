@@ -220,6 +220,7 @@ class MaterialReservation {
     required this.quantity,
     required this.status,
     this.hullId,
+    this.activityId,
     this.neededBy,
     this.issuedAt,
     this.notes,
@@ -228,9 +229,13 @@ class MaterialReservation {
   final String id;
   final String itemId;
 
-  /// The block (or other component) the material is for.
+  /// The block (or other component) the material is for; for a work package
+  /// the yard area of its row.
   final String componentId;
   final String? hullId;
+
+  /// Schedule row the material is for (afloat outfitting work package).
+  final String? activityId;
   final double quantity;
   final ReservationStatus status;
 
@@ -253,6 +258,7 @@ class ReservationDraft {
     required this.componentId,
     required this.quantity,
     this.hullId,
+    this.activityId,
     this.neededBy,
     this.notes,
   });
@@ -261,6 +267,9 @@ class ReservationDraft {
   final String? itemId;
   final String? componentId;
   final String? hullId;
+
+  /// Work package row (migration 018); `null` for block reservations.
+  final String? activityId;
   final double quantity;
   final DateTime? neededBy;
   final String? notes;
@@ -270,6 +279,7 @@ class ReservationDraft {
     itemId: itemId,
     componentId: componentId,
     hullId: hullId,
+    activityId: activityId,
     quantity: quantity ?? this.quantity,
     neededBy: neededBy,
     notes: notes,

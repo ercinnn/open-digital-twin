@@ -13,6 +13,7 @@ import '../../providers/shipyard_providers.dart';
 import '../production/activity_form_dialog.dart' show yardAreas;
 import '../scene_actions.dart';
 import 'material_dialog.dart';
+import 'outfitting_material_dialog.dart';
 import 'steel_reservation_dialog.dart';
 
 /// Hull filter value for items without a hull.
@@ -151,6 +152,17 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(summary)));
   }
 
+  Future<void> _reserveOutfitting(List<Hull> hulls) async {
+    final summary = await OutfittingMaterialDialog.show(
+      context,
+      projectId: widget.projectId,
+      hulls: hulls,
+      initialHullId: _hullFilter == _generalStock ? null : _hullFilter,
+    );
+    if (summary == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(summary)));
+  }
+
   Widget _hullMenu(List<Hull> hulls) {
     final label = switch (_hullFilter) {
       null => 'All hulls',
@@ -182,9 +194,14 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
     final byId = componentsById(components);
     final canEdit = ref.watch(isEditorProvider);
     final reservations = ref.watch(reservationsProvider(widget.projectId)).value ?? const <MaterialReservation>[];
-    // Blocks with an open reservation, per item.
+    // Blocks / work packages with an open reservation, per item.
     final blocksByItem = <String, Set<String>>{};
+    final packagesByItem = <String, Set<String>>{};
     for (final r in reservations.where((r) => r.isOpen)) {
+      if (r.activityId != null) {
+        (packagesByItem[r.itemId] ??= {}).add(r.activityId!);
+        continue;
+      }
       (blocksByItem[r.itemId] ??= {}).add(r.componentId);
     }
 
@@ -261,6 +278,16 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
                         if (canEdit)
                           Padding(
                             padding: const EdgeInsets.only(left: 6),
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                              onPressed: () => _reserveOutfitting(hulls),
+                              icon: const Icon(Icons.handyman_outlined, size: 18),
+                              label: const Text('Reserve outfitting'),
+                            ),
+                          ),
+                        if (canEdit)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 6),
                             child: FilledButton.tonalIcon(
                               style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
                               onPressed: () => _openItem(items: list, hulls: hulls, components: components),
@@ -295,6 +322,8 @@ class _MaterialsTabState extends ConsumerState<MaterialsTab> {
                             [
                               if (item.hullId != null) 'for ${hullNos[item.hullId] ?? 'hull'}',
                               if (blocksByItem[item.id] case final b?) '${b.length} block${b.length == 1 ? '' : 's'}',
+                              if (packagesByItem[item.id] case final p?)
+                                '${p.length} work package${p.length == 1 ? '' : 's'}',
                               if (item.grade != null) item.grade!,
                               if (item.dimensions != null) item.dimensions!,
                               if (item.heatNumber != null) 'heat ${item.heatNumber}',

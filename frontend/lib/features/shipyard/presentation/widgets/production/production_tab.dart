@@ -13,6 +13,7 @@ import '../../providers/shipyard_providers.dart';
 import '../scene_actions.dart';
 import 'activity_dialog.dart';
 import 'activity_form_dialog.dart';
+import 'block_dialog.dart';
 import 'blocks_dialog.dart';
 import 'draft_schedule_dialog.dart';
 import 'gantt_chart.dart';
@@ -157,6 +158,13 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
       case ActivityDialogResult.deleted:
         setState(() => _selectedActivityId = null);
         _snack('${a.code} deleted.');
+      case ActivityDialogResult.packageWork:
+        await BlockDialog.showPackage(
+          context,
+          projectId: widget.projectId,
+          row: a,
+          hull: hulls.where((h) => h.id == a.hullId).firstOrNull,
+        );
       case null:
         break;
     }

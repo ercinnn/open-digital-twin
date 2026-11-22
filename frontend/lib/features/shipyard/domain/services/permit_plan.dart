@@ -2,6 +2,7 @@ import '../entities/block_entities.dart';
 import '../entities/hse_entities.dart';
 import '../entities/production_entities.dart';
 import '../entities/resource_entities.dart';
+import '../entities/work_scope.dart';
 
 /// One permit-to-work a schedule row of a block needs, and the permits that cover it.
 class PermitNeed {
@@ -59,6 +60,21 @@ class PermitPlan {
     };
   }
 
+  /// Permits of the on-board work of an afloat outfitting package at the quay:
+  /// lifting where 9b books quay crane lifts, hot work for welding / fitting,
+  /// confined space for tanks and double bottoms, electrical isolation for the
+  /// switchboard and cabling, painting (+ tanks, staging) for the final coat.
+  static List<PermitType> typesForPackage(WorkPackage? package) => switch (package) {
+    WorkPackage.outfittingSteel => [PermitType.hotWork, PermitType.workAtHeight],
+    WorkPackage.deckMachinery => [PermitType.lifting, PermitType.hotWork],
+    WorkPackage.machinery => [PermitType.lifting, PermitType.hotWork],
+    WorkPackage.piping => [PermitType.hotWork, PermitType.confinedSpace],
+    WorkPackage.electrical => [PermitType.electricalIsolation],
+    WorkPackage.accommodation => const [],
+    WorkPackage.painting => [PermitType.painting, PermitType.confinedSpace, PermitType.workAtHeight],
+    null => const [],
+  };
+
   /// Needs of the rows of [block] that are running at [now] (planned or reported)
   /// or start within [lookAheadDays]; finished rows are left out. Ordered by row start.
   static List<PermitNeed> forBlock({
@@ -66,17 +82,25 @@ class PermitPlan {
     required List<ProductionActivity> activities,
     required List<WorkPermit> permits,
     required DateTime now,
+  }) => forScope(scope: WorkScope.block(block), activities: activities, permits: permits, now: now);
+
+  /// [forBlock] for a block or an afloat outfitting work package row.
+  static List<PermitNeed> forScope({
+    required WorkScope scope,
+    required List<ProductionActivity> activities,
+    required List<WorkPermit> permits,
+    required DateTime now,
   }) {
     final today = dateOnly(now);
     final horizon = addDays(today, lookAheadDays);
     final rows = activities.where((a) {
-      if (a.componentId != block.componentId || a.isDone) return false;
+      if (!scope.ownsRow(a) || a.isDone) return false;
       if (a.isActive) return true;
       return !dateOnly(a.plannedEnd).isBefore(today) && !dateOnly(a.plannedStart).isAfter(horizon);
     }).toList()..sort((a, b) => a.plannedStart.compareTo(b.plannedStart));
     return [
       for (final a in rows)
-        for (final t in typesFor(a.stage, block.type))
+        for (final t in scope.block != null ? typesFor(a.stage, scope.block!.type) : typesForPackage(a.workPackage))
           PermitNeed(
             activity: a,
             type: t,
@@ -88,15 +112,18 @@ class PermitPlan {
   /// Window and description of a permit request for [need]: a lifting permit
   /// takes the next booked crane lift of the row; other permits the next day
   /// shift of the row (07:00, 10 h), or the next full hour when the row runs now.
+  /// [title] replaces the "hull, block, stage" start of the description
+  /// (work packages: "NB-1001 Piping systems").
   static PermitSuggestion suggest({
     required PermitNeed need,
-    required HullBlock block,
+    HullBlock? block,
+    String? title,
     required List<ResourceBooking> bookings,
     required DateTime now,
   }) {
     final a = need.activity;
-    final description =
-        '${block.hullNo} ${block.blockNo} ${a.stage.label.toLowerCase()}: ${need.type.label.toLowerCase()}';
+    final what = title ?? '${block?.hullNo ?? ''} ${block?.blockNo ?? a.code} ${a.stage.label.toLowerCase()}'.trim();
+    final description = '$what: ${need.type.label.toLowerCase()}';
     if (need.type == PermitType.lifting) {
       final lifts =
           bookings
