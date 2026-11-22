@@ -37,7 +37,7 @@ Bir madde tamamlandığında buradan silinip ilgili açıklama `CLAUDE.md`'ye ta
       yazıldı ama çalıştırılarak denenmedi.
 - [ ] **GitHub Actions güncellemesi:** Node.js 20 kullanan action'lar (`checkout@v4`, `configure-pages@v5`,
       `upload-pages-artifact@v3`, `deploy-pages@v4`) yeni sürümlere yükseltilmeli.
-- [ ] **Tersane modülü – sonraki adımlar** (temel modül migration 005-011, uygulamadan gemi projesi kurma adım 1-9a / migration 012-017 ile tamamlandı):
+- [ ] **Tersane modülü – sonraki adımlar** (temel modül migration 005-011, uygulamadan gemi projesi kurma adım 1-9b / migration 012-017 ile tamamlandı):
   - [ ] Departman bazlı yazma yetkisi (ör. boya birimi yalnızca kendi alanını düzenler): `app_editors` + `department_id`, RLS politikalarında kullanım.
   - [ ] Rezervasyon durumlarının zamanla otomatik ilerlemesi (planned → in_progress → done) için pg_cron işi; şu an uygulama "etkin durumu" saate göre gösteriyor.
   - [ ] Blok yerleşimi için alan içi gerçek slot/koordinat bilgisi (şu an alanın uzun ekseni boyunca otomatik sıralanıyor).

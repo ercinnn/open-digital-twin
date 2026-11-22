@@ -178,7 +178,7 @@ class _ResourcesTabState extends ConsumerState<ResourcesTab> {
                   child: OutlinedButton.icon(
                     onPressed: () => _planLifts(hulls, components, bookings.value!),
                     icon: const Icon(Icons.precision_manufacturing_outlined, size: 18),
-                    label: const Text('Plan block lifts'),
+                    label: const Text('Plan lifts'),
                   ),
                 ),
               Tooltip(

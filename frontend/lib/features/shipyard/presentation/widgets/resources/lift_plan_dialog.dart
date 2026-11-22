@@ -7,10 +7,22 @@ import '../../../domain/entities/production_entities.dart';
 import '../../../domain/entities/resource_entities.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
 import '../../../domain/services/lift_plan.dart';
+import '../../../domain/services/outfitting_lifts.dart';
 import '../../providers/shipyard_providers.dart';
 
-/// Books the erection lifts of a hull's blocks ([LiftPlan]) after a preview.
-/// Returns the start of the first booked lift, so the calendar can jump there.
+/// What the lift plan books.
+enum LiftPlanKind {
+  erection('Block erection'),
+  outfitting('Outfitting at the quay');
+
+  const LiftPlanKind(this.label);
+  final String label;
+}
+
+/// Books crane lifts after a preview: the erection lifts of a hull's blocks
+/// ([LiftPlan]) or the quay lifts of its afloat outfitting work packages
+/// ([OutfittingLifts]). Returns the start of the first booked lift, so the
+/// calendar can jump there.
 class LiftPlanDialog extends ConsumerStatefulWidget {
   const LiftPlanDialog({
     super.key,
@@ -45,20 +57,46 @@ class LiftPlanDialog extends ConsumerStatefulWidget {
 
 class _LiftPlanDialogState extends ConsumerState<LiftPlanDialog> {
   final _now = DateTime.now();
-  late final Map<String, LiftPlanResult> _plans = {
-    for (final h in widget.hulls)
-      h.id: LiftPlan.forHull(
-        hull: h,
-        activities: widget.activities,
-        components: widget.components,
-        bookings: widget.bookings,
-        now: _now,
-      ),
+  late final Map<LiftPlanKind, Map<String, LiftPlanResult>> _plans = {
+    LiftPlanKind.erection: {
+      for (final h in widget.hulls)
+        h.id: LiftPlan.forHull(
+          hull: h,
+          activities: widget.activities,
+          components: widget.components,
+          bookings: widget.bookings,
+          now: _now,
+        ),
+    },
+    LiftPlanKind.outfitting: {
+      for (final h in widget.hulls)
+        h.id: OutfittingLifts.forHull(
+          hull: h,
+          activities: widget.activities,
+          components: widget.components,
+          bookings: widget.bookings,
+          now: _now,
+        ),
+    },
   };
-  late final List<Hull> _candidates = widget.hulls
-      .where((h) => _plans[h.id]!.bookings.isNotEmpty || _plans[h.id]!.warnings.isNotEmpty)
-      .toList();
+  late final Map<LiftPlanKind, List<Hull>> _candidatesByKind = {
+    for (final k in LiftPlanKind.values)
+      k: widget.hulls
+          .where((h) => _plans[k]![h.id]!.bookings.isNotEmpty || _plans[k]![h.id]!.warnings.isNotEmpty)
+          .toList(),
+  };
+  late LiftPlanKind _kind =
+      _candidatesByKind[LiftPlanKind.erection]!.isEmpty && _candidatesByKind[LiftPlanKind.outfitting]!.isNotEmpty
+      ? LiftPlanKind.outfitting
+      : LiftPlanKind.erection;
   late String? _hullId = _candidates.firstOrNull?.id;
+
+  List<Hull> get _candidates => _candidatesByKind[_kind]!;
+
+  void _setKind(LiftPlanKind kind) => setState(() {
+    _kind = kind;
+    if (!_candidates.any((h) => h.id == _hullId)) _hullId = _candidates.firstOrNull?.id;
+  });
   bool _saving = false;
   String? _error;
 
@@ -80,31 +118,57 @@ class _LiftPlanDialogState extends ConsumerState<LiftPlanDialog> {
     }
   }
 
+  static const _erectionText =
+      'Each lift lies in the first free window (${LiftPlan.dayStartHour}:00-${LiftPlan.dayEndHour}:00) '
+      'of its erection days.';
+  static const _outfittingText =
+      'The items of a package are spread over its days, each in the first free window '
+      '(${LiftPlan.dayStartHour}:00-${LiftPlan.dayEndHour}:00) of the smallest quay crane that carries its '
+      'estimated weight.';
+
   @override
   Widget build(BuildContext context) {
-    final plan = _hullId == null ? null : _plans[_hullId];
+    final plan = _hullId == null ? null : _plans[_kind]![_hullId];
+    final erection = _kind == LiftPlanKind.erection;
     final names = {for (final c in widget.components) c.id: c.name};
     const muted = TextStyle(fontSize: 12.5, color: AppTheme.textMuted);
     return AlertDialog(
-      title: const Text('Plan block erection lifts'),
+      title: const Text('Plan crane lifts'),
       content: SizedBox(
         width: 620,
-        child: _candidates.isEmpty
-            ? const Text(
-                'No erection rows without a lift. Draft a block schedule first (Production > Plan), '
-                'or every erection already has its crane booking.',
-              )
-            : SingleChildScrollView(
+        child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    SegmentedButton<LiftPlanKind>(
+                      segments: [
+                        for (final k in LiftPlanKind.values) ButtonSegment(value: k, label: Text(k.label)),
+                      ],
+                      selected: {_kind},
+                      showSelectedIcon: false,
+                      onSelectionChanged: _saving ? null : (v) => _setKind(v.first),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_candidates.isEmpty)
+                      Text(
+                        erection
+                            ? 'No erection rows without a lift. Draft a block schedule first (Production > Plan), '
+                                  'or every erection already has its crane booking.'
+                            : 'No outfitting work package lifts left to book. Plan the work packages first '
+                                  '(Production > Plan > Outfitting work packages), or every package item already '
+                                  'has its crane booking.',
+                      )
+                    else ...[
                     DropdownButtonFormField<String>(
+                      key: ValueKey(_kind),
                       initialValue: _hullId,
                       isExpanded: true,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Hull',
-                        helperText: 'Block erection rows that have no crane booking yet.',
+                        helperText: erection
+                            ? 'Block erection rows that have no crane booking yet.'
+                            : 'Work package items (hatch covers, winches, generators, ...) without a quay crane booking.',
                       ),
                       items: [
                         for (final h in _candidates)
@@ -120,9 +184,9 @@ class _LiftPlanDialogState extends ConsumerState<LiftPlanDialog> {
                       Text(
                         '${plan.bookings.length} lift${plan.bookings.length == 1 ? '' : 's'}, '
                         '${formatDateTime(plan.bookings.first.startsAt)} → '
-                        '${formatDateTime(plan.bookings.last.endsAt)}. Each lift lies in the first free window '
-                        '(${LiftPlan.dayStartHour}:00-${LiftPlan.dayEndHour}:00) of its erection days and starts as '
-                        '"Planned"; confirm or cancel single lifts in the calendar.',
+                        '${formatDateTime(plan.bookings.last.endsAt)}. '
+                        '${erection ? _erectionText : _outfittingText} Lifts start as "Planned"; confirm, correct '
+                        'the load or cancel single lifts in the calendar.',
                         style: muted,
                       ),
                       const SizedBox(height: 8),
@@ -162,6 +226,7 @@ class _LiftPlanDialogState extends ConsumerState<LiftPlanDialog> {
                         padding: const EdgeInsets.only(top: 10),
                         child: Text('Not booked: $_error', style: const TextStyle(color: Color(0xFFFCA5A5))),
                       ),
+                    ],
                   ],
                 ),
               ),
