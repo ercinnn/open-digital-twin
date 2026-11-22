@@ -53,6 +53,40 @@ enum ProductionStage {
       this != ProductionStage.dockingRepair && index >= ProductionStage.erection.index;
 }
 
+/// Afloat outfitting work package of a hull (mirrors the
+/// `production_activities.work_package` check constraint, migration 017). The
+/// work is done on board at the quay; [shopNodeId] is the yard shop that
+/// prefabricates / supplies it, [departmentCode] the executing department.
+enum WorkPackage {
+  outfittingSteel('outfitting_steel', 'Outfitting steel', 'OSTL', 'NODE_A15_OUTFITTING_LIGHT_STEEL_SHOP', 'OUT',
+      'Seats, ladders, gratings, railings, doors and hatches'),
+  deckMachinery('deck_machinery', 'Deck machinery & hatch covers', 'DECK', 'NODE_A15_OUTFITTING_LIGHT_STEEL_SHOP', 'OUT',
+      'Hatch covers, windlass, mooring winches, lifeboats and davits'),
+  machinery('machinery', 'Machinery & shaft line', 'MACH', 'NODE_A12_MECHANICAL_MACHINING_SHOP', 'OUT',
+      'Main engine chocking, shaft alignment, propeller, auxiliaries'),
+  piping('piping', 'Piping systems', 'PIPE', 'NODE_A11_PIPE_SHOP', 'OUT',
+      'Pipe spools, valves, ballast / bilge / fuel / cooling systems'),
+  electrical('electrical', 'Electrical & automation', 'ELEC', 'NODE_A13_ELECTRICAL_AUTOMATION_SHOP', 'OUT',
+      'Cable pulling, switchboards, alarm & monitoring, navigation'),
+  accommodation('accommodation', 'Accommodation & insulation', 'ACCO', 'NODE_A14_CARPENTRY_INSULATION_SHOP', 'OUT',
+      'Insulation, linings, furniture, galley and HVAC'),
+  painting('painting', 'Final painting', 'PNT', 'NODE_A10_BLOCK_BLASTING_PAINT_HALL', 'PNT',
+      'Touch-up after outfitting, tank coating, final coat and markings');
+
+  const WorkPackage(this.dbValue, this.label, this.code, this.shopNodeId, this.departmentCode, this.scope);
+
+  final String dbValue;
+  final String label;
+
+  /// Suffix of the activity code (`NB1001-OUTFIT-PIPE`).
+  final String code;
+  final String shopNodeId;
+  final String departmentCode;
+  final String scope;
+
+  static WorkPackage? fromDb(String? value) => WorkPackage.values.where((w) => w.dbValue == value).firstOrNull;
+}
+
 enum HullStatus {
   planned('planned', 'Planned'),
   steelCutting('steel_cutting', 'Steel cutting'),
@@ -258,6 +292,8 @@ class ActivityDraft {
     this.componentId,
     this.sortOrder = 0,
     this.notes,
+    this.workPackage,
+    this.departmentId,
   });
 
   final String projectId;
@@ -272,6 +308,12 @@ class ActivityDraft {
   final int sortOrder;
   final String? notes;
 
+  /// Afloat outfitting work package (hull-level outfitting rows only).
+  final WorkPackage? workPackage;
+
+  /// Executing department; `null` keeps the row's department on a plan update.
+  final String? departmentId;
+
   int get plannedDays => daysBetween(plannedStart, plannedEnd);
 
   /// Human-readable problems; empty when the draft can be saved.
@@ -279,6 +321,8 @@ class ActivityDraft {
     if (code.trim().isEmpty) 'The activity code is missing.',
     if (name.trim().isEmpty) 'Enter a name.',
     if (plannedEnd.isBefore(plannedStart)) 'Planned end is before the planned start.',
+    if (workPackage != null && (componentId != null || stage != ProductionStage.outfitting))
+      'Work packages are hull-level afloat outfitting rows.',
   ];
 }
 
@@ -301,6 +345,7 @@ class ProductionActivity {
     this.actualEnd,
     this.departmentId,
     this.notes,
+    this.workPackage,
   });
 
   final String id;
@@ -319,6 +364,9 @@ class ProductionActivity {
   final int sortOrder;
   final String? departmentId;
   final String? notes;
+
+  /// Afloat outfitting work package (`null` for every other row).
+  final WorkPackage? workPackage;
 
   bool get isDone => actualEnd != null;
   bool get isActive => actualStart != null && actualEnd == null;
@@ -383,6 +431,7 @@ class ProductionActivity {
       sortOrder: sortOrder,
       departmentId: departmentId,
       notes: notes ?? this.notes,
+      workPackage: workPackage,
     );
   }
 }

@@ -7,6 +7,7 @@ import '../../../domain/entities/block_entities.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
 import '../../../domain/services/draft_schedule.dart';
+import '../../providers/scene_view_providers.dart';
 import '../../providers/shipyard_providers.dart';
 
 /// Generates a draft schedule from the hull milestones, shows it as a preview
@@ -69,6 +70,7 @@ class _DraftScheduleDialogState extends ConsumerState<DraftScheduleDialog> {
       ? widget.initialHullId
       : _candidates.firstOrNull?.id;
   bool _perBlock = true;
+  bool _packages = true;
   bool _saving = false;
   String? _error;
 
@@ -99,6 +101,10 @@ class _DraftScheduleDialogState extends ConsumerState<DraftScheduleDialog> {
       existingCodes: codes,
       firstSortOrder: maxSort + 1,
       blocks: _perBlock && !hull.isRepair ? _blocks[hull.id]! : const [],
+      outfittingPackages: _packages,
+      departmentIdByCode: {
+        for (final d in ref.watch(organizationProvider(hull.projectId)).value?.departments ?? const []) d.code: d.id,
+      },
     );
   }
 
@@ -186,6 +192,18 @@ class _DraftScheduleDialogState extends ConsumerState<DraftScheduleDialog> {
                           'Off: one hull-level row per stage.',
                         ),
                       ),
+                    if (hull != null && !hull.isRepair && !_hasRows(hull))
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        value: _packages,
+                        onChanged: _saving ? null : (v) => setState(() => _packages = v ?? true),
+                        title: const Text('Split afloat outfitting into work packages'),
+                        subtitle: const Text(
+                          'Outfitting steel, deck machinery, machinery, piping, electrical, accommodation and '
+                          'final painting, each its own row. Off: one afloat outfitting row.',
+                        ),
+                      ),
                     const SizedBox(height: 12),
                     if (result != null && !result.isValid)
                       _Problems(
@@ -234,7 +252,7 @@ class _Preview extends StatelessWidget {
     final byStage = <ProductionStage, List<ActivityDraft>>{};
     for (final a in activities) {
       if (a.componentId == null) {
-        lines.add((stage: a.stage, label: a.stage.label, location: a.locationNodeId, start: a.plannedStart, end: a.plannedEnd));
+        lines.add((stage: a.stage, label: a.workPackage?.label ?? a.stage.label, location: a.locationNodeId, start: a.plannedStart, end: a.plannedEnd));
       } else {
         byStage.putIfAbsent(a.stage, () => []).add(a);
       }

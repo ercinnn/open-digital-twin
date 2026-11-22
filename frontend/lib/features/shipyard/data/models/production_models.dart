@@ -77,6 +77,7 @@ class ProductionActivityModel {
     sortOrder: readInt(json['sort_order']) ?? 0,
     departmentId: json['department_id'] as String?,
     notes: json['notes'] as String?,
+    workPackage: WorkPackage.fromDb(json['work_package'] as String?),
   );
 
   /// Row for `insert into production_activities`.
@@ -97,6 +98,8 @@ class ProductionActivityModel {
     'planned_start': writeDate(d.plannedStart),
     'planned_end': writeDate(d.plannedEnd),
     'notes': d.notes == null || d.notes!.trim().isEmpty ? null : d.notes!.trim(),
+    'work_package': d.workPackage?.dbValue,
+    if (d.departmentId != null) 'department_id': d.departmentId,
   };
 
   /// Columns an editor may change from the app.

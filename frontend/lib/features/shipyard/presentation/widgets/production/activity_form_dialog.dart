@@ -130,6 +130,8 @@ class _ActivityFormDialogState extends ConsumerState<ActivityFormDialog> {
       plannedEnd: _end,
       locationNodeId: _locationNodeId,
       componentId: _initial?.componentId,
+      // A work package stays one while the row stays an outfitting row.
+      workPackage: _stage == ProductionStage.outfitting ? _initial?.workPackage : null,
       sortOrder: widget.existing.fold<int>(0, (m, a) => a.sortOrder > m ? a.sortOrder : m) + 1,
       notes: _notes.text,
     );

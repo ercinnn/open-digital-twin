@@ -149,6 +149,9 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
     try {
       await supabase.from('production_activities').insert([for (final d in drafts) ProductionActivityModel.insert(d)]);
     } on PostgrestException catch (e) {
+      if (e.code == '23505' && e.message.contains('work_package')) {
+        throw const ShipyardException('A work package is already planned for this hull. Reload and try again.');
+      }
       if (e.code == '23505') throw const ShipyardException('An activity with this code already exists. Reload and try again.');
       _rethrow(e);
     } catch (e) {

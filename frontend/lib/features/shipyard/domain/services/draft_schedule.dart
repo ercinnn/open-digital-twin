@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import '../entities/block_entities.dart';
 import '../entities/production_entities.dart';
+import 'outfitting_packages.dart';
 
 /// Yard area where a stage usually runs (mesh ids of the demo shipyard). `null`
 /// for work outside the yard (sea trials).
@@ -64,6 +65,10 @@ String activityCodeFor(String hullNo, ProductionStage stage, Set<String> existin
 String blockActivityCodeFor(String hullNo, String blockNo, ProductionStage stage, Set<String> existingCodes) =>
     _uniqueCode('${_codePart(hullNo)}-${_codePart(blockNo)}-${_stageCodes[stage]}', existingCodes);
 
+/// Unique activity code of an afloat outfitting work package (`NB1001-OUTFIT-PIPE`).
+String workPackageCodeFor(String hullNo, WorkPackage package, Set<String> existingCodes) =>
+    _uniqueCode('${_codePart(hullNo)}-${_stageCodes[ProductionStage.outfitting]}-${package.code}', existingCodes);
+
 String _codePart(String s) => s.toUpperCase().replaceAll(RegExp('[^A-Z0-9]'), '');
 
 String _uniqueCode(String base, Set<String> existingCodes) {
@@ -101,14 +106,23 @@ class DraftSchedule {
   static DateTime estimatedKeelLaying(DateTime steelCutting, DateTime launching) =>
       addDays(steelCutting, (daysBetween(steelCutting, launching) * 0.45).round());
 
+  /// Afloat outfitting window of the template: the day after launching until
+  /// 20 % of the afloat time before delivery.
+  static (DateTime, DateTime) outfittingWindow(DateTime launching, DateTime delivery) =>
+      (addDays(launching, 1), addDays(delivery, -(daysBetween(launching, delivery) * 0.20).round()));
+
   /// With [blocks] (newbuilds), the steel work and the erection are planned per
   /// block ([BlockSchedule]) and only launching ... delivery stay hull rows.
+  /// With [outfittingPackages] the afloat outfitting is one row per work package
+  /// ([OutfittingPackages]) instead of a single row.
   static DraftScheduleResult forHull(
     Hull hull, {
     required DateTime today,
     Set<String> existingCodes = const {},
     int firstSortOrder = 1,
     List<HullBlock> blocks = const [],
+    bool outfittingPackages = false,
+    Map<String, String> departmentIdByCode = const {},
   }) {
     final delivery = hull.contractDeliveryDate ?? hull.forecastDeliveryDate;
     final codes = {...existingCodes};
@@ -160,6 +174,21 @@ class DraftSchedule {
       final a = daysBetween(l, d);
       DateTime build(double f) => addDays(s, (p * f).round());
       DateTime afloatBack(double f) => addDays(d, -(a * f).round());
+      final (o0, o1) = outfittingWindow(l, d);
+      List<ActivityDraft> outfitting() {
+        if (!outfittingPackages) return [row(ProductionStage.outfitting, o0, o1)];
+        final rows = OutfittingPackages.rows(
+          hull,
+          o0,
+          o1,
+          codes: codes,
+          firstSortOrder: sort,
+          departmentIdByCode: departmentIdByCode,
+        );
+        sort += rows.length;
+        return rows;
+      }
+
       return DraftScheduleResult([
         if (blocks.isEmpty) ...[
           row(ProductionStage.cutting, s, build(0.55)),
@@ -172,7 +201,7 @@ class DraftSchedule {
         ] else
           ...blockRows,
         row(ProductionStage.launching, l, addDays(l, 1), location: BlockSchedule.berthOf(hull)),
-        row(ProductionStage.outfitting, addDays(l, 1), afloatBack(0.20)),
+        ...outfitting(),
         row(ProductionStage.commissioning, addDays(l, (a * 0.45).round()), afloatBack(0.12)),
         row(ProductionStage.seaTrials, afloatBack(0.10), addDays(afloatBack(0.03), -1)),
         row(ProductionStage.delivery, addDays(d, -1), d),

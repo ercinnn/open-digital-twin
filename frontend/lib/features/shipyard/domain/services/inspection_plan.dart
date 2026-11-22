@@ -3,11 +3,15 @@ import '../entities/quality_entities.dart';
 
 /// One inspection the template plans for a schedule stage.
 class _Step {
-  const _Step(this.type, this.description, {this.witness, this.hold = false});
+  const _Step(this.type, this.description, {this.witness, this.hold = false, this.package});
 
   final InspectionType type;
   final String description;
   final String? witness;
+
+  /// Only for this afloat outfitting work package (and the generic outfitting
+  /// row without a package).
+  final WorkPackage? package;
 
   /// Hold point (H): the stage cannot be reported finished before it passes
   /// (database trigger, migration 013). Otherwise a witness / review point.
@@ -42,7 +46,13 @@ const _template = <ProductionStage, List<_Step>>{
     ),
   ],
   ProductionStage.outfitting: [
-    _Step(InspectionType.pressureTest, 'Piping systems, hydrostatic 1.5 x PD', witness: 'Class surveyor', hold: true),
+    _Step(
+      InspectionType.pressureTest,
+      'Piping systems, hydrostatic 1.5 x PD',
+      witness: 'Class surveyor',
+      hold: true,
+      package: WorkPackage.piping,
+    ),
   ],
   ProductionStage.commissioning: [
     _Step(InspectionType.classSurvey, 'Harbour acceptance tests (HAT)', witness: 'Owner representative', hold: true),
@@ -98,6 +108,7 @@ class InspectionPlan {
       if (component == null) continue;
       for (final step in _template[a.stage] ?? const <_Step>[]) {
         if (planned.contains((a.id, step.type))) continue;
+        if (step.package != null && a.workPackage != null && a.workPackage != step.package) continue;
         final preset = inspectionPresets[step.type]!;
         drafts.add(
           InspectionDraft(

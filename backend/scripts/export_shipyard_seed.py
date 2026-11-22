@@ -102,10 +102,11 @@ def production_sql(cur, day0: dt.date) -> tuple[str, dict[str, int]]:
     activities = cur.execute(
         """select h.hull_no, c.metadata->>'block_no', a.activity_code, a.name, a.stage, a.location_node_id,
                   a.planned_start, a.planned_end, a.actual_start, a.actual_end, a.progress_pct, a.sort_order, a.notes,
-                  c.category
+                  c.category, a.work_package, d.code
              from public.production_activities a
              left join public.hulls h on h.id = a.hull_id
              left join public.components c on c.id = a.component_id
+             left join public.departments d on d.id = a.department_id
             where a.project_id = %s
             order by h.hull_no, a.sort_order, a.activity_code""",
         (PROJECT_ID,),
@@ -219,33 +220,39 @@ from (values
                     lit(a[10]),
                     lit(a[11]),
                     lit(a[12]),
+                    lit(a[14]),
+                    lit(a[15]),
                 ]
             )
         out.append(
-            """-- Schedule rows: shop chain + erection per block (block null = hull rows launching ... delivery).
+            """-- Schedule rows: shop chain + erection per block (block null = hull rows launching ... delivery,
+-- work package = afloat outfitting package, 017; department by code).
 insert into public.production_activities
     (project_id, hull_id, component_id, activity_code, name, stage, location_node_id, planned_start, planned_end,
-     actual_start, actual_end, progress_pct, sort_order, notes)
+     actual_start, actual_end, progress_pct, sort_order, notes, work_package, department_id)
 select """
             + P
             + """, h.id, c.id, x.code, x.name, x.stage, x.location, current_date + x.d0::int, current_date + x.d1::int,
-       current_date + x.a0::int, current_date + x.a1::int, x.progress::numeric, x.sort::int, x.notes
+       current_date + x.a0::int, current_date + x.a1::int, x.progress::numeric, x.sort::int, x.notes, x.package, d.id
 from (values
 """
             + values_block(
                 "hull, block, activity code, name, stage, location, planned start, end, actual start, end (days), "
-                "progress %, sort, notes",
+                "progress %, sort, notes, work package, department",
                 rows,
             )
             + """
-) as x(hull_no, block_no, code, name, stage, location, d0, d1, a0, a1, progress, sort, notes)
+) as x(hull_no, block_no, code, name, stage, location, d0, d1, a0, a1, progress, sort, notes, package, dept)
 left join public.hulls h on h.project_id = """
             + P
             + """ and h.hull_no = x.hull_no
 left join public.components c on c.project_id = """
             + P
             + """ and c.category = 'hull_structure'
-    and c.metadata->>'hull_no' = x.hull_no and c.metadata->>'block_no' = x.block_no;
+    and c.metadata->>'hull_no' = x.hull_no and c.metadata->>'block_no' = x.block_no
+left join public.departments d on d.project_id = """
+            + P
+            + """ and d.code = x.dept;
 """
         )
     out.append("-- <<< export:production")

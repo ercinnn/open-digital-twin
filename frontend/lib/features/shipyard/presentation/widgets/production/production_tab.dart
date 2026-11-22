@@ -17,6 +17,7 @@ import 'blocks_dialog.dart';
 import 'draft_schedule_dialog.dart';
 import 'gantt_chart.dart';
 import 'hull_dialog.dart';
+import 'outfitting_packages_dialog.dart';
 import 'timeline_bar.dart';
 
 /// Production schedule: Gantt per hull / block + 3D timeline scrubber.
@@ -54,8 +55,11 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
 
       final byComponent = <String, List<ProductionActivity>>{};
       final hullLevel = <ProductionActivity>[];
+      final byPackage = <WorkPackage, List<ProductionActivity>>{};
       for (final a in items) {
-        if (a.componentId == null) {
+        if (a.workPackage != null) {
+          byPackage.putIfAbsent(a.workPackage!, () => []).add(a);
+        } else if (a.componentId == null) {
           hullLevel.add(a);
         } else {
           byComponent.putIfAbsent(a.componentId!, () => []).add(a);
@@ -84,6 +88,18 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
             sublabel: _hullPositionText(positions[hull.id], byNode) ??
                 (componentIds.isEmpty ? (hull.shipType ?? '') : 'Launching, outfitting, trials'),
             activities: hullLevel,
+          ),
+        );
+      }
+      // Afloat outfitting work packages, one row each (on board at the quay).
+      for (final p in WorkPackage.values) {
+        final rowsOfPackage = byPackage[p];
+        if (rowsOfPackage == null) continue;
+        rows.add(
+          GanttRow(
+            label: p.label,
+            sublabel: 'Outfitting · ${shortComponentName(byNode[p.shopNodeId], fallback: p.shopNodeId)}',
+            activities: rowsOfPackage,
           ),
         );
       }
@@ -175,12 +191,25 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     _snack('Draft schedule created. Tap a bar to adjust or delete it.');
   }
 
+  Future<void> _outfittingPackages(List<Hull> hulls, List<ProductionActivity> activities) async {
+    final message = await OutfittingPackagesDialog.show(
+      context,
+      hulls: hulls,
+      existing: activities,
+      initialHullId: _hullFilter,
+    );
+    if (message == null || !mounted) return;
+    _snack(message);
+  }
+
   Widget _planMenu(List<Hull> hulls, List<TwinComponent> components, List<ProductionActivity> activities) =>
       PopupMenuButton<String>(
         tooltip: 'Plan activities',
-        onSelected: (v) => v == 'add'
-            ? _addActivity(hulls, components, activities)
-            : _draftSchedule(hulls, components, activities),
+        onSelected: (v) => switch (v) {
+          'add' => _addActivity(hulls, components, activities),
+          'packages' => _outfittingPackages(hulls, activities),
+          _ => _draftSchedule(hulls, components, activities),
+        },
         itemBuilder: (_) => const [
           PopupMenuItem(
             value: 'add',
@@ -192,6 +221,14 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
               dense: true,
               leading: Icon(Icons.auto_awesome_motion_outlined),
               title: Text('Draft schedule from milestones…'),
+            ),
+          ),
+          PopupMenuItem(
+            value: 'packages',
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.handyman_outlined),
+              title: Text('Outfitting work packages…'),
             ),
           ),
         ],
