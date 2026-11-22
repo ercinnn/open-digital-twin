@@ -5,6 +5,7 @@ import '../../../../../core/theme/app_theme.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../domain/entities/production_entities.dart';
 import '../../../domain/repositories/shipyard_repository.dart';
+import '../../../domain/services/handover_checklist.dart';
 import '../../providers/shipyard_providers.dart';
 
 /// What the caller should do after [ActivityDialog] closed.
@@ -14,6 +15,9 @@ enum ActivityDialogResult {
 
   /// Open the materials / inspections / permits of the work package row.
   packageWork,
+
+  /// Open the sea trial / delivery checklist of the row.
+  checklist,
 }
 
 /// Details of one schedule row; editors can report progress and actual dates,
@@ -232,6 +236,12 @@ class _ActivityDialogState extends ConsumerState<ActivityDialog> {
         ),
       ),
       actions: [
+        if (HandoverChecklist.hasChecklist(widget.activity))
+          TextButton.icon(
+            onPressed: _saving ? null : () => Navigator.of(context).pop(ActivityDialogResult.checklist),
+            icon: const Icon(Icons.checklist, size: 18),
+            label: const Text('Checklist'),
+          ),
         if (widget.activity.workPackage != null)
           TextButton.icon(
             onPressed: _saving ? null : () => Navigator.of(context).pop(ActivityDialogResult.packageWork),

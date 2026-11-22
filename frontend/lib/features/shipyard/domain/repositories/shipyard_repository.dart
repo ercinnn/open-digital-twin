@@ -1,4 +1,5 @@
 import '../entities/block_entities.dart';
+import '../entities/checklist_entities.dart';
 import '../entities/hse_entities.dart';
 import '../entities/material_entities.dart';
 import '../entities/organization_entities.dart';
@@ -169,6 +170,18 @@ abstract interface class ShipyardRepository {
     required IncidentSeverity severity,
     required String description,
   });
+
+  // ---- Sea trial / delivery checklists (019) -------------------------------------
+  Future<List<ChecklistItem>> fetchChecklistItems(String projectId);
+
+  /// Inserts checklist items in one request. Throws [ShipyardException] for a
+  /// duplicate code on the row.
+  Future<void> createChecklistItems(List<ChecklistDraft> drafts);
+
+  /// Sets an item open / done / waived (waived needs [notes] - database).
+  Future<void> setChecklistStatus(String itemId, ChecklistStatus status, {String? notes, String? completedBy});
+
+  Future<void> deleteChecklistItem(String itemId);
 
   // ---- Dashboard (011) ----------------------------------------------------------
   /// Newest reading per component and metric (RPC `latest_telemetry`).

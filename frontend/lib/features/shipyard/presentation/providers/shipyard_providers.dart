@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/supabase/core_providers.dart';
 import '../../../digital_twin/presentation/providers/twin_providers.dart';
 import '../../data/repositories/shipyard_repository_impl.dart';
+import '../../domain/entities/checklist_entities.dart';
 import '../../domain/entities/hse_entities.dart';
 import '../../domain/entities/material_entities.dart';
 import '../../domain/entities/production_entities.dart';
@@ -151,6 +152,11 @@ final materialsProvider = FutureProvider.autoDispose.family<List<MaterialItem>, 
 /// after a change: the database updates the item totals.
 final reservationsProvider = FutureProvider.autoDispose.family<List<MaterialReservation>, String>((ref, projectId) {
   return ref.watch(shipyardRepositoryProvider).fetchReservations(projectId);
+});
+
+/// Sea trial / delivery checklist items of the project (019).
+final checklistItemsProvider = FutureProvider.autoDispose.family<List<ChecklistItem>, String>((ref, projectId) {
+  return ref.watch(shipyardRepositoryProvider).fetchChecklistItems(projectId);
 });
 
 final recentTagsProvider =FutureProvider.autoDispose.family<List<String>, String>((ref, projectId) {

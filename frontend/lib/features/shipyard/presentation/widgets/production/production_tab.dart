@@ -15,6 +15,7 @@ import 'activity_dialog.dart';
 import 'activity_form_dialog.dart';
 import 'block_dialog.dart';
 import 'blocks_dialog.dart';
+import 'checklist_dialog.dart';
 import 'draft_schedule_dialog.dart';
 import 'gantt_chart.dart';
 import 'hull_dialog.dart';
@@ -158,6 +159,9 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
       case ActivityDialogResult.deleted:
         setState(() => _selectedActivityId = null);
         _snack('${a.code} deleted.');
+      case ActivityDialogResult.checklist:
+        final hull = hulls.where((h) => h.id == a.hullId).firstOrNull;
+        if (hull != null) await ChecklistDialog.show(context, projectId: widget.projectId, row: a, hull: hull);
       case ActivityDialogResult.packageWork:
         await BlockDialog.showPackage(
           context,

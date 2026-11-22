@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../domain/entities/block_entities.dart';
+import '../../domain/entities/checklist_entities.dart';
 import '../../domain/entities/hse_entities.dart';
 import '../../domain/entities/material_entities.dart';
 import '../../domain/entities/organization_entities.dart';
@@ -10,6 +11,7 @@ import '../../domain/entities/resource_entities.dart';
 import '../../domain/repositories/shipyard_repository.dart';
 import '../../domain/services/yard_kpis.dart' show LatestReading;
 import '../models/block_models.dart';
+import '../models/checklist_models.dart';
 import '../models/json_utils.dart';
 import '../models/hse_models.dart';
 import '../models/material_models.dart';
@@ -601,5 +603,59 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
           ),
         )
         .toList();
+  }
+
+  // ---- Sea trial / delivery checklists --------------------------------------------
+  @override
+  Future<List<ChecklistItem>> fetchChecklistItems(String projectId) async {
+    final rows = await supabase
+        .from('handover_checklist_items')
+        .select()
+        .eq('project_id', projectId)
+        .order('sort_order', ascending: true);
+    return rows.map(ChecklistItemModel.fromJson).toList();
+  }
+
+  @override
+  Future<void> createChecklistItems(List<ChecklistDraft> drafts) async {
+    if (drafts.isEmpty) return;
+    try {
+      await supabase.from('handover_checklist_items').insert([for (final d in drafts) ChecklistItemModel.insert(d)]);
+    } on PostgrestException catch (e) {
+      if (e.code == '23505') throw const ShipyardException('The checklist already has an item with this code.');
+      _rethrow(e);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
+  Future<void> setChecklistStatus(String itemId, ChecklistStatus status, {String? notes, String? completedBy}) async {
+    try {
+      final rows = await supabase
+          .from('handover_checklist_items')
+          .update(ChecklistItemModel.statusUpdate(status, notes: notes, completedBy: completedBy))
+          .eq('id', itemId)
+          .select('id');
+      if (rows.isEmpty) throw const ShipyardException('Not saved: sign in with an editor account and reload.');
+    } on ShipyardException {
+      rethrow;
+    } on PostgrestException catch (e) {
+      if (e.code == '23514' && e.message.contains('handover_checklist_items_check')) {
+        throw const ShipyardException('Enter the reason why the item is waived.');
+      }
+      _rethrow(e);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  @override
+  Future<void> deleteChecklistItem(String itemId) async {
+    try {
+      await supabase.from('handover_checklist_items').delete().eq('id', itemId);
+    } catch (e) {
+      _rethrow(e);
+    }
   }
 }
