@@ -48,6 +48,11 @@ enum ProductionStage {
   bool get isPartsStage =>
       this == ProductionStage.cutting || this == ProductionStage.bending || this == ProductionStage.panel;
 
+  /// Short hull-level events (1-2 days): the Gantt draws them as a diamond
+  /// with a label when the bar is too narrow to read.
+  bool get isMilestone =>
+      this == ProductionStage.launching || this == ProductionStage.seaTrials || this == ProductionStage.delivery;
+
   /// From erection on, a block sits at its modelled (erected) position in the hull.
   bool get isErectedOrLater =>
       this != ProductionStage.dockingRepair && index >= ProductionStage.erection.index;

@@ -6,9 +6,12 @@ import '../../../../../core/theme/app_theme.dart';
 import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../digital_twin/domain/entities/twin_entities.dart';
 import '../../../../digital_twin/presentation/providers/twin_providers.dart';
+import '../../../domain/entities/checklist_entities.dart';
 import '../../../domain/entities/production_entities.dart';
+import '../../../domain/services/handover_checklist.dart';
 import '../../../domain/services/yard_kpis.dart';
 import '../../providers/shipyard_providers.dart';
+import '../production/checklist_dialog.dart';
 import '../production/hull_dialog.dart';
 import '../scene_actions.dart';
 
@@ -26,6 +29,11 @@ class DashboardTab extends ConsumerWidget {
     final byId = componentsById(components);
     final today = ref.watch(todayProvider);
     final canEdit = ref.watch(isEditorProvider);
+    final activities = ref.watch(activitiesProvider(projectId)).value ?? const <ProductionActivity>[];
+    final checklistItems = ref.watch(checklistItemsProvider(projectId)).value ?? const <ChecklistItem>[];
+    final checklistRows = {
+      for (final h in kpis.hulls) h.hull.id: HandoverChecklist.rowsOfHull(h.hull.id, activities),
+    };
 
     Future<void> openHull(Hull hull) async {
       if (hull.locationNodeId != null) actions.selectNode(hull.locationNodeId!);
@@ -51,11 +59,20 @@ class DashboardTab extends ConsumerWidget {
         final wide = constraints.maxWidth > 900;
         final hullCards = _HullStrip(
           itemCount: kpis.hulls.length,
-          itemBuilder: (context, i) => _HullCard(
-            health: kpis.hulls[i],
-            today: today,
-            onTap: () => openHull(kpis.hulls[i].hull),
-          ),
+          height: checklistRows.values.any((rows) => rows.isNotEmpty) ? 198 : 164,
+          itemBuilder: (context, i) {
+            final hull = kpis.hulls[i].hull;
+            return _HullCard(
+              health: kpis.hulls[i],
+              today: today,
+              onTap: () => openHull(hull),
+              checklists: [
+                for (final row in checklistRows[hull.id] ?? const <ProductionActivity>[])
+                  (row, HandoverChecklist.progressOf(HandoverChecklist.itemsOf(row, checklistItems))),
+              ],
+              onChecklist: (row) => ChecklistDialog.show(context, projectId: projectId, row: row, hull: hull),
+            );
+          },
         );
         final tiles = Wrap(
           spacing: 10,
@@ -139,9 +156,10 @@ class DashboardTab extends ConsumerWidget {
 /// with the wheel (vertical wheel moves sideways), by dragging, or with the
 /// always-visible scrollbar.
 class _HullStrip extends StatefulWidget {
-  const _HullStrip({required this.itemCount, required this.itemBuilder});
+  const _HullStrip({required this.itemCount, required this.itemBuilder, required this.height});
 
   final int itemCount;
+  final double height;
   final IndexedWidgetBuilder itemBuilder;
 
   @override
@@ -172,7 +190,7 @@ class _HullStripState extends State<_HullStrip> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 164,
+      height: widget.height,
       child: Listener(
         onPointerSignal: _onPointerSignal,
         child: ScrollConfiguration(
@@ -199,11 +217,21 @@ class _HullStripState extends State<_HullStrip> {
 }
 
 class _HullCard extends StatelessWidget {
-  const _HullCard({required this.health, required this.today, required this.onTap});
+  const _HullCard({
+    required this.health,
+    required this.today,
+    required this.onTap,
+    required this.checklists,
+    required this.onChecklist,
+  });
 
   final HullHealth health;
   final DateTime today;
   final VoidCallback onTap;
+
+  /// Sea trials / delivery rows of the hull with their checklist progress.
+  final List<(ProductionActivity, ChecklistProgress)> checklists;
+  final ValueChanged<ProductionActivity> onChecklist;
 
   @override
   Widget build(BuildContext context) {
@@ -277,9 +305,61 @@ class _HullCard extends StatelessWidget {
                     '${health.openPunchA > 0 ? ' · ${health.openPunchA} punch A' : ''}',
                     style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                   ),
+                if (checklists.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      for (final (n, (row, progress)) in checklists.indexed) ...[
+                        if (n > 0) const SizedBox(width: 6),
+                        Expanded(child: _ChecklistShortcut(row: row, progress: progress, onTap: () => onChecklist(row))),
+                      ],
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "Sea trials 4/11" / "Delivery 0/10" button on a hull card: opens the
+/// row's checklist. Green = complete, orange = running with required items
+/// open, grey = no checklist yet or not started.
+class _ChecklistShortcut extends StatelessWidget {
+  const _ChecklistShortcut({required this.row, required this.progress, required this.onTap});
+
+  final ProductionActivity row;
+  final ChecklistProgress progress;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final closed = progress.done + progress.waived;
+    final color = progress.complete
+        ? const Color(0xFF22C55E)
+        : (row.isActive && progress.blocking > 0 ? const Color(0xFFF59E0B) : AppTheme.textMuted);
+    final count = progress.total == 0 ? 'new' : '$closed/${progress.total}';
+    return Tooltip(
+      message: '${row.stage.label} checklist (${row.code})'
+          '${progress.total == 0 ? ': not created yet' : ', ${progress.blocking} required open'}',
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          minimumSize: const Size(0, 28),
+          side: BorderSide(color: color.withValues(alpha: 0.6)),
+          foregroundColor: color,
+        ),
+        icon: Icon(progress.complete ? Icons.task_alt : Icons.checklist, size: 15),
+        label: Text(
+          '${row.stage.label} $count',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
         ),
       ),
     );

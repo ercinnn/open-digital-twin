@@ -157,4 +157,39 @@ void main() {
     expect(item.completedAt, isNotNull);
     expect(item.sortOrder, 200);
   });
+
+  test('dashboard shortcuts: sea trials then delivery, the open row before finished ones', () {
+    final firstTrials = row(ProductionStage.seaTrials, id: 't1', actualEnd: DateTime(2028, 1, 29));
+    final retrial = ProductionActivity(
+      id: 't2',
+      projectId: 'p',
+      hullId: 'h1',
+      code: 'NB1001-SEA_TRIALS-2',
+      name: 'NB-1001 Sea trials (repeat)',
+      stage: ProductionStage.seaTrials,
+      plannedStart: DateTime(2028, 2, 2),
+      plannedEnd: DateTime(2028, 2, 3),
+      progressPct: 0,
+      sortOrder: 2,
+    );
+    final rows = HandoverChecklist.rowsOfHull('h1', [
+      delivery,
+      retrial,
+      firstTrials,
+      row(ProductionStage.commissioning),
+      row(ProductionStage.seaTrials, componentId: 'b1', id: 'block-row'),
+    ]);
+    expect(rows.map((r) => r.id), ['t2', delivery.id]);
+    // All finished: the last one.
+    final done = HandoverChecklist.rowsOfHull('h1', [firstTrials]);
+    expect(done.single.id, 't1');
+    expect(HandoverChecklist.rowsOfHull('other', [trials, delivery]), isEmpty);
+  });
+
+  test('launching, sea trials and delivery are Gantt milestones', () {
+    expect(
+      ProductionStage.values.where((s) => s.isMilestone),
+      [ProductionStage.launching, ProductionStage.seaTrials, ProductionStage.delivery],
+    );
+  });
 }

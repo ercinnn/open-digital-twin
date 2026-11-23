@@ -127,6 +127,23 @@ class HandoverChecklist {
         return c != 0 ? c : a.code.compareTo(b.code);
       });
 
+  /// The checklist rows of [hullId] for shortcuts (dashboard hull card): per
+  /// stage (sea trials, then delivery) the first row that is not finished,
+  /// else the last one.
+  static List<ProductionActivity> rowsOfHull(String hullId, List<ProductionActivity> activities) {
+    final result = <ProductionActivity>[];
+    for (final stage in const [ProductionStage.seaTrials, ProductionStage.delivery]) {
+      final rows = activities.where((a) => a.hullId == hullId && a.stage == stage && hasChecklist(a)).toList()
+        ..sort((a, b) {
+          final c = a.plannedStart.compareTo(b.plannedStart);
+          return c != 0 ? c : a.code.compareTo(b.code);
+        });
+      if (rows.isEmpty) continue;
+      result.add(rows.where((r) => !r.isDone).firstOrNull ?? rows.last);
+    }
+    return result;
+  }
+
   static ChecklistProgress progressOf(List<ChecklistItem> items) => ChecklistProgress(
     total: items.length,
     done: items.where((i) => i.status == ChecklistStatus.done).length,

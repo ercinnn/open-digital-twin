@@ -58,6 +58,12 @@ class GanttChartState extends State<GanttChart> {
   static const laneHeight = 22.0;
   static const headerRowHeight = 24.0;
 
+  /// Bars narrower than this get no text inside.
+  static const minLabelledBarWidth = 46.0;
+
+  /// Half diagonal of the milestone diamond.
+  static const milestoneHalf = 7.0;
+
   double _pxPerDay = 9;
   double _scrollX = 0;
   double _scrollY = 0;
@@ -85,7 +91,7 @@ class GanttChartState extends State<GanttChart> {
 
   int get _totalDays => math.max(1, daysBetween(widget.rangeStart, widget.rangeEnd));
 
-  _GanttLayout _layout() => _GanttLayout.build(widget.rows, widget.today);
+  _GanttLayout _layout() => _GanttLayout.build(widget.rows, widget.today, _pxPerDay);
 
   void _clampScroll() {
     final layout = _layout();
@@ -104,10 +110,18 @@ class GanttChartState extends State<GanttChart> {
     if (p.dx < labelWidth || p.dy < headerHeight) return null;
     final layout = _layout();
     for (final bar in layout.bars) {
-      final rect = _barRect(bar);
+      final rect = bar.isMilestone ? _milestoneRect(bar) : _barRect(bar);
       if (rect.inflate(2).contains(p)) return bar.activity;
     }
     return null;
+  }
+
+  /// Diamond + label of a milestone bar ([_Bar.isMilestone]).
+  Rect _milestoneRect(_Bar bar) {
+    final rect = _barRect(bar);
+    final cx = rect.center.dx;
+    final labelX = math.max(rect.right, cx + milestoneHalf) + 4;
+    return Rect.fromLTRB(math.min(rect.left, cx - milestoneHalf), rect.top, labelX + bar.labelWidth, rect.bottom);
   }
 
   Rect _barRect(_Bar bar) {
@@ -178,6 +192,7 @@ class GanttChartState extends State<GanttChart> {
                 selectedActivityId: widget.selectedActivityId,
                 highlightComponentId: widget.highlightComponentId,
                 barRect: _barRect,
+                milestoneRect: _milestoneRect,
               ),
             ),
           ),
@@ -188,12 +203,22 @@ class GanttChartState extends State<GanttChart> {
 }
 
 class _Bar {
-  const _Bar(this.activity, this.start, this.end, this.top);
+  const _Bar(this.activity, this.start, this.end, this.top, {this.label, this.labelWidth = 0});
   final ProductionActivity activity;
   final DateTime start;
   final DateTime end;
   final double top;
+
+  /// Set for a milestone drawn as a diamond with this text beside it.
+  final String? label;
+  final double labelWidth;
+
+  bool get isMilestone => label != null;
 }
+
+const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const _milestoneStyle = TextStyle(fontSize: 10, fontWeight: FontWeight.w700);
 
 class _RowBox {
   const _RowBox(this.row, this.top, this.height);
@@ -209,7 +234,13 @@ class _GanttLayout {
   final List<_Bar> bars;
   final double contentHeight;
 
-  static _GanttLayout build(List<GanttRow> rows, DateTime today) {
+  /// Text of a milestone diamond, e.g. "Launching 31 Dec".
+  static String milestoneLabel(ProductionActivity a, DateTime today) {
+    final d = a.forecastStart(today);
+    return '${a.stage.label} ${d.day} ${_months[d.month - 1]}';
+  }
+
+  static _GanttLayout build(List<GanttRow> rows, DateTime today, double pxPerDay) {
     final boxes = <_RowBox>[];
     final bars = <_Bar>[];
     var y = 0.0;
@@ -219,26 +250,54 @@ class _GanttLayout {
         y += GanttChartState.headerRowHeight;
         continue;
       }
-      // Greedy lane packing of overlapping bars.
+      // Greedy lane packing of overlapping bars. A short milestone (launching,
+      // sea trials, delivery) too narrow to read becomes a diamond with a
+      // label; the label takes room in its lane so no other bar covers it.
       final items = row.activities.toList()
         ..sort((a, b) => a.forecastStart(today).compareTo(b.forecastStart(today)));
       final laneEnds = <DateTime>[];
-      final placed = <(ProductionActivity, int)>[];
+      final placed = <(ProductionActivity, int, String?, double)>[];
       for (final a in items) {
         final s = a.forecastStart(today);
-        var lane = laneEnds.indexWhere((end) => !s.isBefore(end));
+        var end = a.forecastEnd(today);
+        String? label;
+        var labelWidth = 0.0;
+        final barPx = daysBetween(s, end) * pxPerDay;
+        if (a.stage.isMilestone && barPx < GanttChartState.minLabelledBarWidth) {
+          label = milestoneLabel(a, today);
+          final painter = TextPainter(
+            text: TextSpan(text: label, style: _milestoneStyle),
+            textDirection: TextDirection.ltr,
+            maxLines: 1,
+          )..layout();
+          labelWidth = painter.width;
+          painter.dispose();
+          final markerPx = math.max(barPx, barPx / 2 + GanttChartState.milestoneHalf) + 4 + labelWidth + 6;
+          final reserved = addDays(s, (markerPx / pxPerDay).ceil());
+          if (reserved.isAfter(end)) end = reserved;
+        }
+        var lane = laneEnds.indexWhere((laneEnd) => !s.isBefore(laneEnd));
         if (lane < 0) {
-          laneEnds.add(a.forecastEnd(today));
+          laneEnds.add(end);
           lane = laneEnds.length - 1;
         } else {
-          laneEnds[lane] = a.forecastEnd(today);
+          laneEnds[lane] = end;
         }
-        placed.add((a, lane));
+        placed.add((a, lane, label, labelWidth));
       }
       final lanes = math.max(1, laneEnds.length);
       final height = lanes * GanttChartState.laneHeight + 4;
-      for (final (a, lane) in placed) {
-        bars.add(_Bar(a, a.forecastStart(today), a.forecastEnd(today), y + 2 + lane * GanttChartState.laneHeight));
+      for (final (a, lane, label, labelWidth) in placed) {
+        bars.add(
+          _Bar(
+            a,
+            a.forecastStart(today),
+            a.forecastEnd(today),
+            y + 2 + lane * GanttChartState.laneHeight,
+            label: label,
+            labelWidth: labelWidth,
+          ),
+        );
       }
       boxes.add(_RowBox(row, y, height));
       y += height;
@@ -260,6 +319,7 @@ class _GanttPainter extends CustomPainter {
     required this.selectedActivityId,
     required this.highlightComponentId,
     required this.barRect,
+    required this.milestoneRect,
   });
 
   final _GanttLayout layout;
@@ -273,9 +333,9 @@ class _GanttPainter extends CustomPainter {
   final String? selectedActivityId;
   final String? highlightComponentId;
   final Rect Function(_Bar) barRect;
+  final Rect Function(_Bar) milestoneRect;
 
   static const _late = Color(0xFFEF4444);
-  static const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   double _x(DateTime d) => GanttChartState.labelWidth + daysBetween(rangeStart, d) * pxPerDay - scrollX;
 
@@ -320,7 +380,12 @@ class _GanttPainter extends CustomPainter {
     // bars
     for (final bar in layout.bars) {
       final rect = barRect(bar);
-      if (rect.right < lw || rect.left > size.width || rect.bottom < hh || rect.top > size.height) continue;
+      final extent = bar.isMilestone ? milestoneRect(bar) : rect;
+      if (extent.right < lw || extent.left > size.width || extent.bottom < hh || extent.top > size.height) continue;
+      if (bar.isMilestone) {
+        _milestone(canvas, bar, rect);
+        continue;
+      }
       final a = bar.activity;
       final color = a.stage.color;
       // planned window (thin line under the bar)
@@ -416,6 +481,62 @@ class _GanttPainter extends CustomPainter {
     canvas.restore();
     canvas.drawLine(const Offset(lw, 0), Offset(lw, size.height), Paint()..color = AppTheme.outline);
     _text(canvas, 'HULL / BLOCK', const Offset(10, 11), size: 10, weight: FontWeight.w700);
+  }
+
+  /// Diamond on the (narrow) bar plus its label: hollow = not started, left
+  /// half filled = running, filled = done; outline red = late, white = selected.
+  void _milestone(Canvas canvas, _Bar bar, Rect rect) {
+    final a = bar.activity;
+    final color = a.stage.color;
+    // planned window (thin line under the marker) and the actual / forecast span
+    final px0 = _x(a.plannedStart);
+    final px1 = _x(a.plannedEnd);
+    canvas.drawRect(
+      Rect.fromLTWH(px0, rect.bottom + 1, math.max(2, px1 - px0), 2.5),
+      Paint()..color = AppTheme.textMuted.withValues(alpha: 0.55),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(Rect.fromLTWH(rect.left, rect.center.dy - 2, rect.width, 4), const Radius.circular(2)),
+      Paint()..color = color.withValues(alpha: 0.45),
+    );
+    const h = GanttChartState.milestoneHalf;
+    final c = rect.center;
+    final diamond = Path()
+      ..moveTo(c.dx, c.dy - h)
+      ..lineTo(c.dx + h, c.dy)
+      ..lineTo(c.dx, c.dy + h)
+      ..lineTo(c.dx - h, c.dy)
+      ..close();
+    canvas.drawPath(diamond, Paint()..color = AppTheme.background);
+    if (a.isDone) {
+      canvas.drawPath(diamond, Paint()..color = color);
+    } else {
+      canvas.drawPath(diamond, Paint()..color = color.withValues(alpha: a.isNotStarted ? 0.22 : 0.38));
+      if (a.isActive) {
+        canvas.save();
+        canvas.clipRect(Rect.fromLTRB(c.dx - h, c.dy - h, c.dx, c.dy + h));
+        canvas.drawPath(diamond, Paint()..color = color);
+        canvas.restore();
+      }
+    }
+    final late = a.isLate(today);
+    final selected = a.id == selectedActivityId;
+    final related = highlightComponentId != null && a.componentId == highlightComponentId;
+    canvas.drawPath(
+      diamond,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = selected ? 2.2 : 1.4
+        ..color = selected ? Colors.white : (late ? _late : (related ? AppTheme.accent : color)),
+    );
+    _text(
+      canvas,
+      bar.label!,
+      Offset(math.max(rect.right, c.dx + h) + 4, rect.top + 1),
+      size: _milestoneStyle.fontSize!,
+      color: late ? const Color(0xFFFCA5A5) : const Color(0xFFE2E8F0),
+      weight: _milestoneStyle.fontWeight!,
+    );
   }
 
   void _marker(Canvas canvas, double x, Color color, String text) {
