@@ -50,14 +50,17 @@ class _BookingDetailsDialogState extends ConsumerState<BookingDetailsDialog> {
   Widget build(BuildContext context) {
     final b = widget.booking;
     final canEdit = ref.watch(isEditorProvider);
-    final status = b.effectiveStatus(DateTime.now());
+    final now = DateTime.now();
+    final status = b.effectiveStatus(now);
+    final unconfirmed = b.isUnconfirmed(now);
+    final over = !b.endsAt.isAfter(now);
     final capacity = widget.resource == null ? null : resourceCapacity(widget.resource!);
     final rows = <(String, String)>[
       ('Resource', widget.resource?.name ?? b.componentId),
       ('Type', b.type.label),
       if (b.slot > 1 || widget.resource?.category == 'outfitting_quay') ('Berth slot', '${b.slot}'),
       ('Window', '${formatDateTime(b.startsAt)} → ${formatDateTime(b.endsAt)}'),
-      ('Status', status.label),
+      ('Status', unconfirmed ? '${status.label} - not confirmed' : status.label),
       if (b.loadT != null) ('Load', '${b.loadT!.toStringAsFixed(0)} t${capacity == null ? '' : ' of ${capacity.toStringAsFixed(0)} t capacity'}'),
       if (widget.hullName != null) ('Hull', widget.hullName!),
       if ((b.notes ?? '').isNotEmpty) ('Notes', b.notes!),
@@ -89,6 +92,31 @@ class _BookingDetailsDialogState extends ConsumerState<BookingDetailsDialog> {
                     const Icon(Icons.air, color: Color(0xFFFDBA74)),
                     const SizedBox(width: 8),
                     Expanded(child: Text(b.suspendedReason ?? 'Suspended', style: const TextStyle(fontSize: 12.5))),
+                  ],
+                ),
+              ),
+            if (unconfirmed || b.needsConfirmation(now))
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: unconfirmed ? const Color(0xFF78350F) : AppTheme.surfaceHigh,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.help_outline, color: unconfirmed ? const Color(0xFFFCD34D) : AppTheme.accent),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        unconfirmed
+                            ? 'The window ${over ? 'is over' : 'has started'} but the booking was never confirmed, '
+                                'so it was not started. Confirm it if the work took place, else cancel or re-plan it.'
+                            : 'Starts within ${ResourceBooking.confirmBeforeHours} h and is not confirmed yet. '
+                                'Only confirmed bookings start and finish with their window.',
+                        style: const TextStyle(fontSize: 12.5),
+                      ),
+                    ),
                   ],
                 ),
               ),

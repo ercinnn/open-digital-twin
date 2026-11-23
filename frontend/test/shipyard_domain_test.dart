@@ -80,6 +80,21 @@ void main() {
       expect(booking('b', 'r', -5, -1).effectiveStatus(now), BookingStatus.done);
       expect(booking('c', 'r', 2, 4).effectiveStatus(now), BookingStatus.confirmed);
       expect(booking('d', 'r', -1, 2, status: BookingStatus.suspended).effectiveStatus(now), BookingStatus.suspended);
+      expect(booking('e', 'r', -5, -1, status: BookingStatus.inProgress).effectiveStatus(now), BookingStatus.done);
+    });
+
+    test('planned bookings never start by themselves (migration 020) and ask for confirmation', () {
+      final running = booking('p1', 'r', -1, 2, status: BookingStatus.planned);
+      final over = booking('p2', 'r', -5, -1, status: BookingStatus.planned);
+      final tomorrow = booking('p3', 'r', 20, 22, status: BookingStatus.planned);
+      final later = booking('p4', 'r', 30, 32, status: BookingStatus.planned);
+      expect(running.effectiveStatus(now), BookingStatus.planned);
+      expect(over.effectiveStatus(now), BookingStatus.planned);
+      expect([running, over, tomorrow, later].map((b) => b.isUnconfirmed(now)), [true, true, false, false]);
+      expect([running, over, tomorrow, later].map((b) => b.needsConfirmation(now)), [false, false, true, false]);
+      final confirmed = booking('c', 'r', -1, 2);
+      expect(confirmed.isUnconfirmed(now) || confirmed.needsConfirmation(now), isFalse);
+      expect(booking('x', 'r', -1, 2, status: BookingStatus.cancelled).isUnconfirmed(now), isFalse);
     });
   });
 
@@ -167,6 +182,33 @@ void main() {
       expect(k.bottlenecks.map((c) => c.id), containsAll(['a05', 'a07']));
       expect(k.attention.first.severity, Severity.critical);
       expect(k.attention.first.detail, contains('1 lift(s) suspended'));
+    });
+
+    test('unconfirmed bookings: one item each, more than three collapse', () {
+      YardKpis kpis(List<ResourceBooking> bookings) => YardKpis.compute(
+        now: now,
+        hulls: const [],
+        activities: const [],
+        components: [comp('crn', 'crane')],
+        readings: const [],
+        bookings: bookings,
+      );
+      final few = kpis([
+        booking('NB-1001 DB-101 erection lift', 'crn', -1, 2, status: BookingStatus.planned),
+        booking('NB-1001 DB-102 erection lift', 'crn', 3, 5, status: BookingStatus.planned),
+        booking('confirmed lift', 'crn', 6, 8),
+        booking('next week', 'crn', 200, 202, status: BookingStatus.planned),
+      ]).attention;
+      expect(few.map((a) => a.title), ['Not confirmed: NB-1001 DB-101 erection lift', 'Confirm: NB-1001 DB-102 erection lift']);
+      expect(few.map((a) => a.severity), [Severity.warning, Severity.info]);
+      expect(few.first.detail, startsWith('Area crn - Shop · window started'));
+      expect(few.first.componentId, 'crn');
+
+      final many = kpis([
+        for (var i = 0; i < 5; i++) booking('lift $i', 'crn', -10 + i, -9 + i, status: BookingStatus.planned),
+      ]).attention;
+      expect(many.single.title, '5 bookings not confirmed');
+      expect(many.single.detail, contains('First: lift 0'));
     });
   });
 

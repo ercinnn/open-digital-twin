@@ -379,8 +379,10 @@ class _ResourceRow extends StatelessWidget {
     final right = math.min(trackWidth, b.endsAt.difference(from).inMinutes / 60 * pxPerHour);
     final status = b.effectiveStatus(now);
     final suspended = status == BookingStatus.suspended;
+    final unconfirmed = b.isUnconfirmed(now);
     final color = suspended ? const Color(0xFFF87171) : b.type.color;
     final faded = status == BookingStatus.done || status == BookingStatus.planned;
+    final border = suspended ? Colors.white : (unconfirmed ? const Color(0xFFF59E0B) : color);
     return Positioned(
       left: left,
       width: math.max(4, right - left),
@@ -388,6 +390,7 @@ class _ResourceRow extends StatelessWidget {
       height: laneHeight - 6,
       child: Tooltip(
         message: '${b.title}\n${formatDateTime(b.startsAt)} → ${formatDateTime(b.endsAt)}\n${status.label}'
+            '${unconfirmed ? ' - not confirmed' : ''}'
             '${b.loadT == null ? '' : ' · ${b.loadT!.toStringAsFixed(0)} t'}'
             '${suspended && b.suspendedReason != null ? '\n${b.suspendedReason}' : ''}',
         child: InkWell(
@@ -398,10 +401,10 @@ class _ResourceRow extends StatelessWidget {
             decoration: BoxDecoration(
               color: color.withValues(alpha: faded ? 0.35 : 0.85),
               borderRadius: BorderRadius.circular(5),
-              border: Border.all(color: suspended ? Colors.white : color, width: suspended ? 1.5 : 1),
+              border: Border.all(color: border, width: suspended || unconfirmed ? 1.5 : 1),
             ),
             child: Text(
-              '${suspended ? '⏸ ' : ''}${b.title}',
+              '${suspended ? '⏸ ' : (unconfirmed ? '? ' : '')}${b.title}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: faded ? Colors.white : const Color(0xFF0B1220)),

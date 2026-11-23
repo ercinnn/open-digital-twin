@@ -72,16 +72,30 @@ class ResourceBooking {
 
   bool overlaps(DateTime from, DateTime to) => startsAt.isBefore(to) && endsAt.isAfter(from);
 
-  /// Status as shown to the user: confirmed bookings whose window is running count
-  /// as in progress, finished windows as done (the database keeps the planned value).
+  /// Status as shown to the user. Mirrors the database clock job (migration 020,
+  /// every minute), so the view is right between two runs: a confirmed booking
+  /// is in progress while its window runs, confirmed / in progress are done once
+  /// it ended. Planned (not confirmed) bookings never start by themselves; see
+  /// [isUnconfirmed].
   BookingStatus effectiveStatus(DateTime now) {
-    if (status == BookingStatus.cancelled || status == BookingStatus.suspended || status == BookingStatus.done) {
-      return status;
-    }
+    if (status != BookingStatus.confirmed && status != BookingStatus.inProgress) return status;
     if (!endsAt.isAfter(now)) return BookingStatus.done;
     if (!startsAt.isAfter(now)) return BookingStatus.inProgress;
     return status;
   }
+
+  /// Hours before the start from which a planned booking asks for confirmation.
+  static const confirmBeforeHours = 24;
+
+  /// Planned, and its window has started or is over: it did not run (or nobody
+  /// confirmed it). Confirm it if it took place, else cancel or re-plan it.
+  bool isUnconfirmed(DateTime now) => status == BookingStatus.planned && !startsAt.isAfter(now);
+
+  /// Planned and starting within [confirmBeforeHours].
+  bool needsConfirmation(DateTime now) =>
+      status == BookingStatus.planned &&
+      startsAt.isAfter(now) &&
+      !startsAt.isAfter(now.add(const Duration(hours: confirmBeforeHours)));
 }
 
 /// New booking entered in the app.

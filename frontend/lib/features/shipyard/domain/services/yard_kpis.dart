@@ -171,6 +171,42 @@ class YardKpis {
         componentId: c.id,
       ));
     }
+    // Planned bookings are not started by the clock job (migration 020): ask
+    // for confirmation before the window, flag those whose window started.
+    // More than three of a kind collapse into one item.
+    int byStart(ResourceBooking a, ResourceBooking b) => a.startsAt.compareTo(b.startsAt);
+    final unconfirmed = bookings.where((b) => b.isUnconfirmed(now)).toList()..sort(byStart);
+    final dueSoon = bookings.where((b) => b.needsConfirmation(now)).toList()..sort(byStart);
+    String resourceName(ResourceBooking b) => byId[b.componentId]?.name ?? 'resource';
+    for (final (list, severity, title, detail, summary) in [
+      (
+        unconfirmed,
+        Severity.warning,
+        (ResourceBooking b) => 'Not confirmed: ${b.title}',
+        (ResourceBooking b) => '${resourceName(b)} · window started ${formatDateTime(b.startsAt)}, still planned - confirm or cancel',
+        '${unconfirmed.length} bookings not confirmed',
+      ),
+      (
+        dueSoon,
+        Severity.info,
+        (ResourceBooking b) => 'Confirm: ${b.title}',
+        (ResourceBooking b) => '${resourceName(b)} · starts ${formatDateTime(b.startsAt)}',
+        '${dueSoon.length} bookings to confirm within ${ResourceBooking.confirmBeforeHours} h',
+      ),
+    ]) {
+      if (list.length <= 3) {
+        for (final b in list) {
+          attention.add(AttentionItem(severity: severity, title: title(b), detail: detail(b), componentId: b.componentId));
+        }
+      } else {
+        attention.add(AttentionItem(
+          severity: severity,
+          title: summary,
+          detail: 'First: ${list.first.title} (${formatDateTime(list.first.startsAt)}) - see Resources',
+          componentId: list.first.componentId,
+        ));
+      }
+    }
     for (final h in health.where((h) => (h.delayDays ?? 0) > 0)) {
       attention.add(AttentionItem(
         severity: Severity.critical,
