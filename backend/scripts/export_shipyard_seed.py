@@ -5,7 +5,8 @@ This script reads the app data from the remote database and rewrites two
 generated regions of supabase/seed.sql (the rest of the file is hand-written):
 
   -- >>> export:production   hulls, hull blocks (components hull_structure),
-                             schedule rows (production_activities)
+                             schedule rows (production_activities, with
+                             their area slot_no, 021)
   -- >>> export:operations   app-planned crane lifts (resource_bookings with an
                              activity_id), block material reservations,
                              quality inspections (ITP points and single ones),
@@ -17,7 +18,8 @@ NODE_* literals (their mesh id is derived in SQL, other rows join on hull_no +
 block_no), so the GLB contract test only sees the yard nodes.
 
 Not exported (hand-written seed sections): stock items, maintenance bookings,
-organization, HSE zones and incidents. Issued reservations are replayed as `issued`, so the database
+organization, HSE zones and incidents, area slots (021; the schedule rows only
+carry the slot number, so the slot section must stay above export:production). Issued reservations are replayed as `issued`, so the database
 lowers the seeded stock on hand again (and writes the trace event) - do not also
 lower quantity_on_hand in the stock section.
 
@@ -102,7 +104,7 @@ def production_sql(cur, day0: dt.date) -> tuple[str, dict[str, int]]:
     activities = cur.execute(
         """select h.hull_no, c.metadata->>'block_no', a.activity_code, a.name, a.stage, a.location_node_id,
                   a.planned_start, a.planned_end, a.actual_start, a.actual_end, a.progress_pct, a.sort_order, a.notes,
-                  c.category, a.work_package, d.code
+                  c.category, a.work_package, d.code, a.slot_no
              from public.production_activities a
              left join public.hulls h on h.id = a.hull_id
              left join public.components c on c.id = a.component_id
@@ -222,27 +224,29 @@ from (values
                     lit(a[12]),
                     lit(a[14]),
                     lit(a[15]),
+                    lit(a[16]),
                 ]
             )
         out.append(
             """-- Schedule rows: shop chain + erection per block (block null = hull rows launching ... delivery,
--- work package = afloat outfitting package, 017; department by code).
+-- work package = afloat outfitting package, 017; department by code; slot = area slot, 021).
 insert into public.production_activities
     (project_id, hull_id, component_id, activity_code, name, stage, location_node_id, planned_start, planned_end,
-     actual_start, actual_end, progress_pct, sort_order, notes, work_package, department_id)
+     actual_start, actual_end, progress_pct, sort_order, notes, work_package, department_id, slot_no)
 select """
             + P
             + """, h.id, c.id, x.code, x.name, x.stage, x.location, current_date + x.d0::int, current_date + x.d1::int,
-       current_date + x.a0::int, current_date + x.a1::int, x.progress::numeric, x.sort::int, x.notes, x.package, d.id
+       current_date + x.a0::int, current_date + x.a1::int, x.progress::numeric, x.sort::int, x.notes, x.package, d.id,
+       x.slot::smallint
 from (values
 """
             + values_block(
                 "hull, block, activity code, name, stage, location, planned start, end, actual start, end (days), "
-                "progress %, sort, notes, work package, department",
+                "progress %, sort, notes, work package, department, slot",
                 rows,
             )
             + """
-) as x(hull_no, block_no, code, name, stage, location, d0, d1, a0, a1, progress, sort, notes, package, dept)
+) as x(hull_no, block_no, code, name, stage, location, d0, d1, a0, a1, progress, sort, notes, package, dept, slot)
 left join public.hulls h on h.project_id = """
             + P
             + """ and h.hull_no = x.hull_no

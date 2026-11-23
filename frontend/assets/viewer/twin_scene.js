@@ -10,8 +10,10 @@
  *             focus_nodes{mesh_node_ids:[...]}, reset_camera{},
  *             set_color_mode{mode:"status"|"material"|"overlay"},
  *             set_overlay{colors:{mesh_node_id:"#rrggbb"}}            (overlay color mode; others dimmed)
- *             set_placements{placements:{mesh_node_id:{mode:"home"|"hidden"|"area", area, ghost}}}
- *                 moves block meshes to a yard area node (halls hosting blocks turn x-ray)
+ *             set_placements{placements:{mesh_node_id:{mode:"home"|"hidden"|"area", area, ghost, slot?}}}
+ *                 moves block meshes to a yard area node (halls hosting blocks turn x-ray);
+ *                 slot {x, y, sx, sy, code} = plan centre (world x, -z) of the block's area slot,
+ *                 blocks without a slot are lined up along the area's long axis
  *             set_markers{markers:[{id, mesh_node_id, u, v, w, color, label}]}
  *                 pins at a normalized point (u: x, v: z, w: height) of the node's bounding box
  *             set_highlights{highlights:{mesh_node_id:"#rrggbb"}}       (blinking emissive)
@@ -448,7 +450,24 @@
         var center = areaBox.getCenter(new THREE.Vector3());
         var size = areaBox.getSize(new THREE.Vector3());
         var alongX = size.x >= size.z;
-        var ids = groups[areaId].sort();
+        var groundY = Math.max(areaBox.min.y, 0) + 0.3;
+        // Blocks on a numbered slot (021): bottom centre on the slot centre
+        // (plan x / y -> world x / -z); the others are lined up as before.
+        var ids = [];
+        groups[areaId].sort().forEach(function (id) {
+          var slot = placements[id].slot;
+          if (slot && isFinite(slot.x) && isFinite(slot.y)) {
+            var node = nodes.get(id);
+            var box = homeBox(node);
+            var bottomCenter = new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2);
+            var target = new THREE.Vector3(Number(slot.x), groundY, -Number(slot.y));
+            startMove(node, node.userData.homePosition.clone().add(target.sub(bottomCenter)), animate);
+          } else {
+            ids.push(id);
+          }
+        });
+        xrayIds.add(areaId);
+        if (!ids.length) return;
         var gap = 6;
         var lengths = ids.map(function (id) {
           var s = homeBox(nodes.get(id)).getSize(new THREE.Vector3());
@@ -456,7 +475,6 @@
         });
         var total = lengths.reduce(function (a, b) { return a + b; }, 0) + gap * (ids.length - 1);
         var cursor = -total / 2;
-        var groundY = Math.max(areaBox.min.y, 0) + 0.3;
         ids.forEach(function (id, i) {
           var node = nodes.get(id);
           var box = homeBox(node);

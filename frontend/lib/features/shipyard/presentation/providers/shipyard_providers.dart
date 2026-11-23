@@ -11,6 +11,7 @@ import '../../domain/entities/material_entities.dart';
 import '../../domain/entities/production_entities.dart';
 import '../../domain/entities/quality_entities.dart';
 import '../../domain/entities/resource_entities.dart';
+import '../../domain/entities/slot_entities.dart';
 import '../../domain/repositories/shipyard_repository.dart';
 import '../../domain/services/hull_position.dart';
 import '../../domain/services/production_schedule.dart';
@@ -120,12 +121,24 @@ final sceneDateProvider = Provider.autoDispose.family<DateTime, String>((ref, pr
 });
 
 /// Block placements keyed by mesh_node_id for the scene date.
+/// Slot rows of the yard (021). Invalidate after editing slots.
+final areaSlotListProvider = FutureProvider.autoDispose.family<List<AreaSlot>, String>((ref, projectId) {
+  return ref.watch(shipyardRepositoryProvider).fetchAreaSlots(projectId);
+});
+
+/// Slots by area mesh id (schedule rows name their area by mesh id).
+final areaSlotsProvider = Provider.autoDispose.family<AreaSlots, String>((ref, projectId) {
+  final list = ref.watch(areaSlotListProvider(projectId)).value ?? const <AreaSlot>[];
+  final components = ref.watch(componentsProvider(projectId)).value ?? const [];
+  return AreaSlots(list, {for (final c in components) c.id: c.meshNodeId});
+});
+
 final blockPlacementsProvider = Provider.autoDispose.family<Map<String, BlockPlacement>, String>((ref, projectId) {
   final components = ref.watch(componentsProvider(projectId)).value ?? const [];
   final schedule = ref.watch(scheduleProvider(projectId));
   final date = ref.watch(sceneDateProvider(projectId));
   final today = ref.watch(todayProvider);
-  final byComponent = schedule.placementsAt(date, today);
+  final byComponent = schedule.placementsAt(date, today, slots: ref.watch(areaSlotsProvider(projectId)));
   return {
     for (final c in components)
       if (byComponent[c.id] != null) c.meshNodeId: byComponent[c.id]!,

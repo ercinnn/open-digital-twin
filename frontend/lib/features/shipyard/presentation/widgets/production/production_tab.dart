@@ -7,6 +7,7 @@ import '../../../../auth/presentation/providers/auth_providers.dart';
 import '../../../../digital_twin/domain/entities/twin_entities.dart';
 import '../../../../digital_twin/presentation/providers/twin_providers.dart';
 import '../../../domain/entities/production_entities.dart';
+import '../../../domain/entities/slot_entities.dart';
 import '../../../domain/services/hull_position.dart';
 import '../../../domain/services/production_schedule.dart';
 import '../../providers/shipyard_providers.dart';
@@ -20,6 +21,7 @@ import 'draft_schedule_dialog.dart';
 import 'gantt_chart.dart';
 import 'hull_dialog.dart';
 import 'outfitting_packages_dialog.dart';
+import 'slot_assignment_dialog.dart';
 import 'timeline_bar.dart';
 
 /// Production schedule: Gantt per hull / block + 3D timeline scrubber.
@@ -46,6 +48,7 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     DateTime today,
     DateTime sceneDate,
     HullPositionMap positions,
+    AreaSlots slots,
   ) {
     final rows = <GanttRow>[];
     for (final hull in hulls) {
@@ -74,7 +77,7 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
 
       final componentIds = byComponent.keys.toList()..sort((a, b) => sequence(a).compareTo(sequence(b)));
       for (final id in componentIds) {
-        final placement = ProductionSchedule.placementFor(schedule.forComponent(id, today), sceneDate, today);
+        final placement = ProductionSchedule.placementFor(schedule.forComponent(id, today), sceneDate, today, slots: slots);
         rows.add(
           GanttRow(
             label: shortComponentName(byId[id]),
@@ -121,7 +124,8 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     PlacementKind.erected => p.activity?.stage == ProductionStage.erection && p.activity?.isDone != true
         ? 'Erection on berth'
         : 'Erected',
-    PlacementKind.area => '${p.ghost ? 'Parts at ' : 'At '}${shortComponentName(byNode[p.areaNodeId], fallback: p.areaNodeId)}',
+    PlacementKind.area => '${p.ghost ? 'Parts at ' : 'At '}${shortComponentName(byNode[p.areaNodeId], fallback: p.areaNodeId)}'
+        '${p.slot == null ? '' : ' · ${p.slot!.code}'}',
   };
 
   Future<void> _onTap(
@@ -143,7 +147,13 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
       context,
       activity: a,
       blockName: block?.name,
-      locationName: a.locationNodeId == null ? null : byNode[a.locationNodeId]?.name,
+      locationName: a.locationNodeId == null
+          ? null
+          : [
+              byNode[a.locationNodeId]?.name ?? a.locationNodeId!,
+              if (ref.read(areaSlotsProvider(widget.projectId)).find(a.locationNodeId, a.slotNo) case final slot?)
+                'slot ${slot.code}${slot.notes == null ? '' : ' (${slot.notes})'}',
+            ].join(' · '),
     );
     if (!mounted) return;
     switch (result) {
@@ -214,12 +224,25 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     _snack(message);
   }
 
+  Future<void> _assignSlots(List<Hull> hulls, List<ProductionActivity> activities) async {
+    final message = await SlotAssignmentDialog.show(
+      context,
+      projectId: widget.projectId,
+      hulls: hulls,
+      existing: activities,
+      initialHullId: _hullFilter,
+    );
+    if (message == null || !mounted) return;
+    _snack(message);
+  }
+
   Widget _planMenu(List<Hull> hulls, List<TwinComponent> components, List<ProductionActivity> activities) =>
       PopupMenuButton<String>(
         tooltip: 'Plan activities',
         onSelected: (v) => switch (v) {
           'add' => _addActivity(hulls, components, activities),
           'packages' => _outfittingPackages(hulls, activities),
+          'slots' => _assignSlots(hulls, activities),
           _ => _draftSchedule(hulls, components, activities),
         },
         itemBuilder: (_) => const [
@@ -241,6 +264,14 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
               dense: true,
               leading: Icon(Icons.handyman_outlined),
               title: Text('Outfitting work packages…'),
+            ),
+          ),
+          PopupMenuItem(
+            value: 'slots',
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.grid_view_outlined),
+              title: Text('Assign area slots…'),
             ),
           ),
         ],
@@ -352,7 +383,16 @@ class _ProductionTabState extends ConsumerState<ProductionTab> {
     final byId = componentsById(components);
     final byNode = componentsByNode(components);
     final hullList = hulls.value!;
-    final rows = _rows(hullList, schedule, byId, byNode, today, sceneDate, ref.watch(hullPositionsProvider(widget.projectId)));
+    final rows = _rows(
+      hullList,
+      schedule,
+      byId,
+      byNode,
+      today,
+      sceneDate,
+      ref.watch(hullPositionsProvider(widget.projectId)),
+      ref.watch(areaSlotsProvider(widget.projectId)),
+    );
     final running = schedule.runningAt(sceneDate, today).length;
 
     return Column(

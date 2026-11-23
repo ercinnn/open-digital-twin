@@ -78,6 +78,7 @@ class ProductionActivityModel {
     departmentId: json['department_id'] as String?,
     notes: json['notes'] as String?,
     workPackage: WorkPackage.fromDb(json['work_package'] as String?),
+    slotNo: readInt(json['slot_no']),
   );
 
   /// Row for `insert into production_activities`.

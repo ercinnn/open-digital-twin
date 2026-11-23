@@ -6,6 +6,7 @@ import '../entities/organization_entities.dart';
 import '../entities/production_entities.dart';
 import '../entities/quality_entities.dart';
 import '../entities/resource_entities.dart';
+import '../entities/slot_entities.dart';
 import '../services/yard_kpis.dart' show LatestReading;
 
 /// Shipyard operations data of one yard project (migrations 005..011).
@@ -182,6 +183,14 @@ abstract interface class ShipyardRepository {
   Future<void> setChecklistStatus(String itemId, ChecklistStatus status, {String? notes, String? completedBy});
 
   Future<void> deleteChecklistItem(String itemId);
+
+  // ---- Area slots (021) ---------------------------------------------------------------
+  Future<List<AreaSlot>> fetchAreaSlots(String projectId);
+
+  /// Puts a block row on slot [slotNo] of its area, `null` frees it. Throws
+  /// [ShipyardException] when the slot is taken in the row's window, missing in
+  /// the area or too weak for the block (database).
+  Future<void> setActivitySlot(String activityId, int? slotNo);
 
   // ---- Dashboard (011) ----------------------------------------------------------
   /// Newest reading per component and metric (RPC `latest_telemetry`).

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'slot_entities.dart';
+
 /// Calendar-day helpers (schedule columns are PostgreSQL `date`s).
 DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
@@ -351,6 +353,7 @@ class ProductionActivity {
     this.departmentId,
     this.notes,
     this.workPackage,
+    this.slotNo,
   });
 
   final String id;
@@ -372,6 +375,10 @@ class ProductionActivity {
 
   /// Afloat outfitting work package (`null` for every other row).
   final WorkPackage? workPackage;
+
+  /// Slot of the area the block occupies (`area_slots.slot_no`, migration 021);
+  /// `null` = no fixed place.
+  final int? slotNo;
 
   bool get isDone => actualEnd != null;
   bool get isActive => actualStart != null && actualEnd == null;
@@ -437,6 +444,7 @@ class ProductionActivity {
       departmentId: departmentId,
       notes: notes ?? this.notes,
       workPackage: workPackage,
+      slotNo: slotNo,
     );
   }
 }
@@ -445,14 +453,14 @@ enum PlacementKind { erected, area, hidden }
 
 /// Where the 3D viewer should show a block mesh at a given date.
 class BlockPlacement {
-  const BlockPlacement._(this.kind, {this.areaNodeId, this.ghost = false, this.activity});
+  const BlockPlacement._(this.kind, {this.areaNodeId, this.ghost = false, this.activity, this.slot});
 
   const BlockPlacement.erected({ProductionActivity? activity}) : this._(PlacementKind.erected, activity: activity);
 
   const BlockPlacement.hidden() : this._(PlacementKind.hidden);
 
-  const BlockPlacement.atArea(String areaNodeId, {bool ghost = false, ProductionActivity? activity})
-    : this._(PlacementKind.area, areaNodeId: areaNodeId, ghost: ghost, activity: activity);
+  const BlockPlacement.atArea(String areaNodeId, {bool ghost = false, ProductionActivity? activity, AreaSlot? slot})
+    : this._(PlacementKind.area, areaNodeId: areaNodeId, ghost: ghost, activity: activity, slot: slot);
 
   final PlacementKind kind;
   final String? areaNodeId;
@@ -463,17 +471,30 @@ class BlockPlacement {
   /// Activity that determines the placement (running or last finished).
   final ProductionActivity? activity;
 
+  /// Slot of the area the block stands on ([ProductionActivity.slotNo]);
+  /// `null` = the viewer lines the block up with the other unslotted ones.
+  final AreaSlot? slot;
+
   /// Payload for the viewer command `set_placements`.
   Map<String, dynamic> toViewerJson() => switch (kind) {
     PlacementKind.erected => const {'mode': 'home'},
     PlacementKind.hidden => const {'mode': 'hidden'},
-    PlacementKind.area => {'mode': 'area', 'area': areaNodeId, 'ghost': ghost},
+    PlacementKind.area => {
+      'mode': 'area',
+      'area': areaNodeId,
+      'ghost': ghost,
+      if (slot != null) 'slot': slot!.toViewerJson(),
+    },
   };
 
   @override
   bool operator ==(Object other) =>
-      other is BlockPlacement && other.kind == kind && other.areaNodeId == areaNodeId && other.ghost == ghost;
+      other is BlockPlacement &&
+      other.kind == kind &&
+      other.areaNodeId == areaNodeId &&
+      other.ghost == ghost &&
+      other.slot == slot;
 
   @override
-  int get hashCode => Object.hash(kind, areaNodeId, ghost);
+  int get hashCode => Object.hash(kind, areaNodeId, ghost, slot);
 }

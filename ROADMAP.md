@@ -39,6 +39,6 @@ Bir madde tamamlandığında buradan silinip ilgili açıklama `CLAUDE.md`'ye ta
       `upload-pages-artifact@v3`, `deploy-pages@v4`) yeni sürümlere yükseltilmeli.
 - [ ] **Tersane modülü – sonraki adımlar** (temel modül migration 005-011, uygulamadan gemi projesi kurma adım 1-9 / migration 012-019 ile tamamlandı; rezervasyon durumlarının saate göre ilerlemesi migration 020):
   - [ ] Departman bazlı yazma yetkisi (ör. boya birimi yalnızca kendi alanını düzenler): `app_editors` + `department_id`, RLS politikalarında kullanım.
-  - [ ] Blok yerleşimi için alan içi gerçek slot/koordinat bilgisi (şu an alanın uzun ekseni boyunca otomatik sıralanıyor).
+  - [ ] Alan slotları (migration 021, adım 10b-1 tamam): slot zeminlerinin kodlarıyla 3B'de gösterilmesi, aktivite formunda elle slot seçimi, alan / gün bazında slot doluluk görünümü.
   - [ ] QR/RFID için kamera ile barkod okuma (mobil); şu an klavye-wedge okuyucu veya elle giriş.
   - [ ] Masaüstü/mobil görüntüleyicide tersane katmanlarının (pin, etiket) denenmesi.

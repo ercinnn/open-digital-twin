@@ -522,6 +522,60 @@ cross join generate_series(1, 24) as g;
 -- seed is re-applied. Names of owners, vessels and people are fictional.
 -- =============================================================================
 
+-- Area slots (021) ---------------------------------------------------------------
+-- Numbered work places of areas 5-10 (yard plan metres of generate_sample_models.py;
+-- the joining yard uses its 15 stool groups). Inserted before the schedule rows,
+-- which may reference a slot (production_activities.slot_no).
+insert into public.area_slots
+    (project_id, component_id, slot_no, code, center_x_m, center_y_m, size_x_m, size_y_m, max_load_t, notes)
+select '33333333-3333-3333-3333-333333333333', c.id, x.slot_no, x.code, x.cx, x.cy, x.sx, x.sy, x.max_t, x.notes
+from (values
+    -- area node,                              no, code,     centre x, y,      size x, y,  max t, notes
+    ('NODE_A05_CNC_CUTTING_SHOP',               1, 'A05-01', 565.0,  466.25,  44, 28,  null::numeric, 'Plasma table 1'),
+    ('NODE_A05_CNC_CUTTING_SHOP',               2, 'A05-02', 615.0,  466.25,  44, 28,  null, 'Plasma table 2'),
+    ('NODE_A05_CNC_CUTTING_SHOP',               3, 'A05-03', 565.0,  498.75,  44, 28,  null, 'Plasma table 3'),
+    ('NODE_A05_CNC_CUTTING_SHOP',               4, 'A05-04', 615.0,  498.75,  44, 28,  null, 'Profile cutting line'),
+    ('NODE_A06_BENDING_PRESS_SHOP',             1, 'A06-01', 670.0,  482.5,   26, 56,  null, '1000 t press'),
+    ('NODE_A06_BENDING_PRESS_SHOP',             2, 'A06-02', 700.0,  482.5,   26, 56,  null, 'Plate rolls'),
+    ('NODE_A06_BENDING_PRESS_SHOP',             3, 'A06-03', 730.0,  482.5,   26, 56,  null, 'Frame bender'),
+    ('NODE_A07_PANEL_SUB_ASSEMBLY_LINE',        1, 'A07-01', 640.8,  357.5,   38, 30,  null, 'Panel line station 1'),
+    ('NODE_A07_PANEL_SUB_ASSEMBLY_LINE',        2, 'A07-02', 682.5,  357.5,   38, 30,  null, 'Panel line station 2'),
+    ('NODE_A07_PANEL_SUB_ASSEMBLY_LINE',        3, 'A07-03', 724.2,  357.5,   38, 30,  null, 'Panel line station 3'),
+    ('NODE_A07_PANEL_SUB_ASSEMBLY_LINE',        4, 'A07-04', 640.8,  392.5,   38, 30,  null, 'Sub-assembly bay 1'),
+    ('NODE_A07_PANEL_SUB_ASSEMBLY_LINE',        5, 'A07-05', 682.5,  392.5,   38, 30,  null, 'Sub-assembly bay 2'),
+    ('NODE_A07_PANEL_SUB_ASSEMBLY_LINE',        6, 'A07-06', 724.2,  392.5,   38, 30,  null, 'Sub-assembly bay 3'),
+    ('NODE_A08_BLOCK_ASSEMBLY_HALL',            1, 'A08-01', 460.0,  352.5,   36, 40,  200, 'Bay 1 (4 x 50 t cranes in tandem)'),
+    ('NODE_A08_BLOCK_ASSEMBLY_HALL',            2, 'A08-02', 500.0,  352.5,   36, 40,  200, 'Bay 2'),
+    ('NODE_A08_BLOCK_ASSEMBLY_HALL',            3, 'A08-03', 540.0,  352.5,   36, 40,  200, 'Bay 3'),
+    ('NODE_A08_BLOCK_ASSEMBLY_HALL',            4, 'A08-04', 580.0,  352.5,   36, 40,  200, 'Bay 4'),
+    ('NODE_A08_BLOCK_ASSEMBLY_HALL',            5, 'A08-05', 460.0,  397.5,   36, 40,  200, 'Bay 5'),
+    ('NODE_A08_BLOCK_ASSEMBLY_HALL',            6, 'A08-06', 500.0,  397.5,   36, 40,  200, 'Bay 6'),
+    ('NODE_A08_BLOCK_ASSEMBLY_HALL',            7, 'A08-07', 540.0,  397.5,   36, 40,  200, 'Bay 7'),
+    ('NODE_A08_BLOCK_ASSEMBLY_HALL',            8, 'A08-08', 580.0,  397.5,   36, 40,  200, 'Bay 8'),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',     1, 'A09-01', 262.0,  215.0,   50, 34,  null, 'Stool group row 1'),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',     2, 'A09-02', 317.0,  215.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',     3, 'A09-03', 372.0,  215.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',     4, 'A09-04', 427.0,  215.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',     5, 'A09-05', 482.0,  215.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',     6, 'A09-06', 262.0,  253.0,   50, 34,  null, 'Stool group row 2'),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',     7, 'A09-07', 317.0,  253.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',     8, 'A09-08', 372.0,  253.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',     9, 'A09-09', 427.0,  253.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',    10, 'A09-10', 482.0,  253.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',    11, 'A09-11', 262.0,  291.0,   50, 34,  null, 'Stool group row 3'),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',    12, 'A09-12', 317.0,  291.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',    13, 'A09-13', 372.0,  291.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',    14, 'A09-14', 427.0,  291.0,   50, 34,  null, null),
+    ('NODE_A09_OUTDOOR_BLOCK_JOINING_YARD',    15, 'A09-15', 482.0,  291.0,   50, 34,  null, null),
+    ('NODE_A10_BLOCK_BLASTING_PAINT_HALL',      1, 'A10-01', 295.0,  355.0,   46, 36,  null, 'Blasting cell 1'),
+    ('NODE_A10_BLOCK_BLASTING_PAINT_HALL',      2, 'A10-02', 345.0,  355.0,   46, 36,  null, 'Blasting cell 2'),
+    ('NODE_A10_BLOCK_BLASTING_PAINT_HALL',      3, 'A10-03', 395.0,  355.0,   46, 36,  null, 'Blasting cell 3'),
+    ('NODE_A10_BLOCK_BLASTING_PAINT_HALL',      4, 'A10-04', 295.0,  395.0,   46, 36,  null, 'Paint cell 1'),
+    ('NODE_A10_BLOCK_BLASTING_PAINT_HALL',      5, 'A10-05', 345.0,  395.0,   46, 36,  null, 'Paint cell 2'),
+    ('NODE_A10_BLOCK_BLASTING_PAINT_HALL',      6, 'A10-06', 395.0,  395.0,   46, 36,  null, 'Paint cell 3')
+) as x(node, slot_no, code, cx, cy, sx, sy, max_t, notes)
+join public.components c on c.project_id = '33333333-3333-3333-3333-333333333333' and c.mesh_node_id = x.node;
+
 -- >>> export:production (generated by scripts.export_shipyard_seed - do not edit by hand)
 -- Hulls and production schedule (005): ship projects entered in the app (Production tab:
 -- "New hull", "Blocks", "Plan" > Draft schedule), exported on 2026-11-22. Dates are day offsets

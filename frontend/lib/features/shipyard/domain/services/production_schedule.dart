@@ -1,4 +1,5 @@
 import '../entities/production_entities.dart';
+import '../entities/slot_entities.dart';
 
 /// Earned vs planned progress of a set of activities (duration weighted).
 class ScheduleProgress {
@@ -35,18 +36,24 @@ class ProductionSchedule {
   ///    the steel is still in parts); erection and later stages = erected position
   ///  * between activities the block waits at the last finished activity's area
   ///  * before its first activity the block does not exist yet (hidden)
+  ///  * at an area it stands on the slot of that row ([AreaSlots], migration 021)
   /// Blocks without schedule rows keep their modelled position (no entry).
-  Map<String, BlockPlacement> placementsAt(DateTime date, DateTime today) {
+  Map<String, BlockPlacement> placementsAt(DateTime date, DateTime today, {AreaSlots slots = const AreaSlots.empty()}) {
     final d = dateOnly(date);
     final ids = activities.map((a) => a.componentId).whereType<String>().toSet();
     final result = <String, BlockPlacement>{};
     for (final id in ids) {
-      result[id] = placementFor(forComponent(id, today), d, today);
+      result[id] = placementFor(forComponent(id, today), d, today, slots: slots);
     }
     return result;
   }
 
-  static BlockPlacement placementFor(List<ProductionActivity> ordered, DateTime date, DateTime today) {
+  static BlockPlacement placementFor(
+    List<ProductionActivity> ordered,
+    DateTime date,
+    DateTime today, {
+    AreaSlots slots = const AreaSlots.empty(),
+  }) {
     if (ordered.isEmpty) return const BlockPlacement.erected();
     ProductionActivity? running;
     ProductionActivity? lastFinished;
@@ -65,6 +72,7 @@ class ProductionSchedule {
       source.locationNodeId!,
       ghost: running != null && source.stage.isPartsStage,
       activity: source,
+      slot: slots.find(source.locationNodeId, source.slotNo),
     );
   }
 

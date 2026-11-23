@@ -8,6 +8,7 @@ import '../../domain/entities/organization_entities.dart';
 import '../../domain/entities/production_entities.dart';
 import '../../domain/entities/quality_entities.dart';
 import '../../domain/entities/resource_entities.dart';
+import '../../domain/entities/slot_entities.dart';
 import '../../domain/repositories/shipyard_repository.dart';
 import '../../domain/services/yard_kpis.dart' show LatestReading;
 import '../models/block_models.dart';
@@ -19,6 +20,7 @@ import '../models/organization_models.dart';
 import '../models/production_models.dart';
 import '../models/quality_models.dart';
 import '../models/resource_models.dart';
+import '../models/slot_models.dart';
 
 class ShipyardRepositoryImpl implements ShipyardRepository {
   ShipyardRepositoryImpl({required this.supabase});
@@ -29,6 +31,11 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
   static Never _rethrow(Object error) {
     if (error is PostgrestException) {
       switch (error.code) {
+        case '23P01' when error.message.contains('slot_overlap'):
+          throw const ShipyardException(
+            'Conflict: another block holds this area slot in the planned window. '
+            'Choose another slot, free it first or move the dates.',
+          );
         case '23P01':
           throw const ShipyardException(
             'Conflict: the resource (and slot) is already booked in this time window. '
@@ -654,6 +661,33 @@ class ShipyardRepositoryImpl implements ShipyardRepository {
   Future<void> deleteChecklistItem(String itemId) async {
     try {
       await supabase.from('handover_checklist_items').delete().eq('id', itemId);
+    } catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  // ---- Area slots (021) -----------------------------------------------------------
+  @override
+  Future<List<AreaSlot>> fetchAreaSlots(String projectId) async {
+    final rows = await supabase
+        .from('area_slots')
+        .select()
+        .eq('project_id', projectId)
+        .order('slot_no', ascending: true);
+    return rows.map(AreaSlotModel.fromJson).toList();
+  }
+
+  @override
+  Future<void> setActivitySlot(String activityId, int? slotNo) async {
+    try {
+      final rows = await supabase
+          .from('production_activities')
+          .update({'slot_no': slotNo})
+          .eq('id', activityId)
+          .select('id');
+      if (rows.isEmpty) throw const ShipyardException('Not saved: sign in with an editor account and reload.');
+    } on ShipyardException {
+      rethrow;
     } catch (e) {
       _rethrow(e);
     }
